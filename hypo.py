@@ -93,7 +93,7 @@ def hypoloc(data, V, hinit, maxit, convh, verbose=False):
             loc[inh,1:] += dh
             if dc < convh:
                 if verbose:
-                    print('  Converged at iteration '+str(it))
+                    print('     Converged at iteration '+str(it))
                     sys.stdout.flush()
                 break
         nev += 1
@@ -184,7 +184,7 @@ def hypolocPS(data, V, hinit, maxit, convh, verbose=False):
             loc[inh,1:] += dh
             if dc < convh:
                 if verbose:
-                    print('  Converged at iteration '+str(it))
+                    print('     Converged at iteration '+str(it))
                     sys.stdout.flush()
                 break
         nev += 1
@@ -215,6 +215,10 @@ class Grid3D():
 
     def getNumberOfNodes(self):
         return self.x.size * self.y.size * self.z.size
+    
+    @property
+    def shape(self):
+        return (self.x.size, self.y.size, self.z.size)
 
     def ind(self, i, j, k):
         return (i*self.y.size + j)*self.z.size + k
@@ -259,7 +263,7 @@ class Grid3D():
             nx = len(self.x) - 1
             ny = len(self.y) - 1
             nz = len(self.z) - 1
-
+            
             self.cgrid = cgrid3d.Grid3Dcpp(b'node', nx, ny, nz, self.dx,
                                            self.x[0], self.y[0], self.z[0],
                                            1.e-15, 20, True, self.nthreads)
@@ -410,13 +414,15 @@ class InvParams():
         self.Vpmin = Vlim[0]
         self.Vpmax = Vlim[1]
         self.PAp   = Vlim[2]
-        self.Vsmin = Vlim[3]
-        self.Vsmax = Vlim[4]
-        self.PAs   = Vlim[5]
+        if len(Vlim) > 3:
+            self.Vsmin = Vlim[3]
+            self.Vsmax = Vlim[4]
+            self.PAs   = Vlim[5]
         self.dVp_max = dmax[0]
         self.dx_max = dmax[1]
         self.dt_max = dmax[2]
-        self.dVs_max = dmax[3]
+        if len(dmax) > 3:
+            self.dVs_max = dmax[3]
         self.lmbda = lagrangians[0]
         self.gamma = lagrangians[1]
         self.alpha = lagrangians[2]
@@ -734,7 +740,7 @@ def jointHypoVel(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.ar
 def _reloc(ne, par, grid, evID, hyp0, data, tobs, s):
 
     if par.verbose:
-        print('                Updating event ID {0:d} ({1:d}/{2:d})'.format(int(evID[ne]), ne+1, nev))
+        print('                Updating event ID {0:d} ({1:d}/{2:d})'.format(int(evID[ne]), ne+1, evID.size))
         print('                  Updating latitude & longitude', end='')
         sys.stdout.flush()
 
@@ -790,6 +796,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, tobs, s):
                     print(' - converged at iteration '+str(itt+1))
                     sys.stdout.flush()
                 break
+            phyp = hyp0[indh,2:4].copy()
 
     else:
         if par.verbose:
@@ -844,6 +851,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, tobs, s):
                     print(' - converged at iteration '+str(itt+1))
                     sys.stdout.flush()
                 break
+            phyp = hyp0[indh,2:].copy()
 
     else:
         if par.verbose:
@@ -1089,16 +1097,22 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
                 # Merge Mevp & Mevs
                 Mev = [None] * nev
                 for ne in np.arange(nev):
+                    
+                    Mp = sp.csr_matrix(Mevp[ne], shape=(Mevp[ne][2].size-1,nnodes))
+                    Ms = sp.csr_matrix(Mevs[ne], shape=(Mevs[ne][2].size-1,nnodes))
+                    
                     if par.invert_VsVp:
                         # Block 1991, p. 45
-                        tmp1 = Mevs[ne].multiply(np.matlib.repmat(Vp.T, Mevs[ne].shape[0], 1))
+                        tmp1 = Ms.multiply(np.matlib.repmat(Vp.T, Ms.shape[0], 1))
                         VsVp = Vs.A / Vp.A
-                        tmp2 = Mevs[ne].multiply(np.matlib.repmat(VsVp.T, Mevs[ne].shape[0], 1))
+                        tmp2 = Ms.multiply(np.matlib.repmat(VsVp.T, Ms.shape[0], 1))
                         tmp2 = sp.hstack((tmp1, tmp2))
-                        tmp1 = sp.hstack((Mevp[ne], sp.csr_matrix(Mevp[ne].shape)))
+                        tmp1 = sp.hstack((Mp, sp.csr_matrix(Mp.shape)))
                         Mev[ne] = sp.vstack((tmp1, tmp2))
                     else:
                         Mev[ne] = np.block_diag((Mevp[ne], Mevs[ne]))
+                    # add zeros for station corrections
+                    Mev[ne] = sp.hstack((Mev[ne], sp.csr_matrix((Mev[ne].shape[0], 2*nsta))))
 
             else:
                 tcalc = np.array([])
@@ -1149,8 +1163,7 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
 
                 Q, _ = np.linalg.qr(H, mode='complete')
                 T = sp.csr_matrix(Q[:, 4:]).T
-                M = sp.csr_matrix(Mev[ne], shape=(nst,2*nnodes+2*nsta))
-                M = T * M
+                M = T * Mev[ne]
 
                 if M1 == None:
                     M1 = M
@@ -1162,7 +1175,7 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
 
 
             for nc in range(ncal):
-                M = sp.csr_matrix(Mcal[nc], shape=(Mcal[nc][2].size-1, nnodes+nsta))
+                M = sp.csr_matrix(Mcal[nc], shape=(Mcal[nc][2].size-1, 2*nnodes+2*nsta))
                 if M1 == None:
                     M1 = M
                 else:
@@ -1174,7 +1187,7 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
 
             s = -u1.T * deltam
 
-            dP1 = sp.hstack((dP, sp.csr_matrix(np.zeros((nnodes,nsta)))))  # dP prime
+            dP1 = sp.hstack((dP, sp.csr_matrix((2*nnodes,2*nsta))))  # dP prime
 
             # compute A & h for inversion
 
@@ -1252,7 +1265,7 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
 def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
 
     if par.verbose:
-        print('                Updating event ID {0:d} ({1:d}/{2:d})'.format(int(evID[ne]), ne+1, nev))
+        print('                Updating event ID {0:d} ({1:d}/{2:d})'.format(int(evID[ne]), ne+1, evID.size))
         print('                  Updating latitude & longitude', end='')
         sys.stdout.flush()
 
@@ -1308,6 +1321,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
                     print(' - converged at iteration '+str(itt+1))
                     sys.stdout.flush()
                 break
+            phyp = hyp0[indh,2:4].copy()
 
     else:
         if par.verbose:
@@ -1362,6 +1376,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
                     print(' - converged at iteration '+str(itt+1))
                     sys.stdout.flush()
                 break
+            phyp = hyp0[indh,2:].copy()
 
     else:
         if par.verbose:
@@ -1376,7 +1391,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
 if __name__ == '__main__':
 
 
-    g = Grid3D(np.arange(100., 201., 10.),np.arange(100., 201., 10.),np.arange(0., 71., 10.))
+    g = Grid3D(np.arange(80., 221., 10.),np.arange(70., 221., 10.),np.arange(0., 91., 10.))
     slowness = 1./4000.0 + np.zeros(g.getNumberOfNodes())
     
     rcv = np.array([[112., 115., 13.],
@@ -1403,7 +1418,7 @@ if __name__ == '__main__':
     src = np.kron(src,np.ones((nsta,1)))
     rcv = np.kron(np.ones((nev,1)), rcv)
 
-    tt, rays, v0, M = g.raytrace(slowness, src, rcv)
+    tt = g.raytrace(slowness, src, rcv)
 
     noise_variance = 1.e-3;  # 1 ms
     tt += noise_variance*np.random.randn(tt.size)
@@ -1416,7 +1431,7 @@ if __name__ == '__main__':
                        160. + 0.1*np.random.randn(nev),
                         35. + 0.1*np.random.randn(nev))).T
 
-    Vinit = 3900.0 + np.zeros((g.getNumberOfNodes(),))
+    Vinit = 3800.0 + np.zeros((g.getNumberOfNodes(),))
     Vpts = np.array([[4000.0, 110.0, 110.0, 10.0],
                      [4000.0, 112.0, 148.0, 11.0]])
 
@@ -1459,6 +1474,6 @@ if __name__ == '__main__':
     par = InvParams(maxit=2, maxit_hypo=10, conv_hypo=2, Vlim=Vlim, dmax=dmax,
                     lagrangians=lagran, invert_vel=True, verbose=True)
 
-    hinit, res = hypoloc(data, 4000., hinit, 15, 5., True)
+    hinit, res = hypoloc(data, 3900., hinit, 15, 5., True)
 
     h, V, sc, res = jointHypoVel(par, g, data, Vinit, hinit, caldata=caldata, Vpts=Vpts)
