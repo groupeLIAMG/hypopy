@@ -96,6 +96,11 @@ def hypoloc(data, V, hinit, maxit, convh, verbose=False):
                     print('     Converged at iteration '+str(it))
                     sys.stdout.flush()
                 break
+        else:
+            if verbose:
+                print('     Reached max number of iteration ('+str(maxit)+')')
+                sys.stdout.flush()
+                    
         nev += 1
 
     return loc, res
@@ -124,7 +129,7 @@ def hypolocPS(data, V, hinit, maxit, convh, verbose=False):
     """
 
     if verbose:
-        print(' *** Hypocenter inversion  -- P- and S-wave data ***\n')
+        print(' *** Hypocenter inversion  --  P and S-wave data ***\n')
     evID = np.unique(data[:,0])
     loc = hinit.copy()
     res = np.zeros((evID.size, maxit))
@@ -187,6 +192,11 @@ def hypolocPS(data, V, hinit, maxit, convh, verbose=False):
                     print('     Converged at iteration '+str(it))
                     sys.stdout.flush()
                 break
+        else:
+            if verbose:
+                print('     Reached max number of iteration ('+str(maxit)+')')
+                sys.stdout.flush()
+
         nev += 1
         
     return loc, res
@@ -402,10 +412,10 @@ class InvParams():
                         gamma :
                         alpha :
                         wzK   : weight for vertical smoothing (w.r. to horizontal smoothing)
-        invert_vel  : perform velocity inversion if True
-        invert_VsVp : find Vs/Vp ratio rather that Vs
-        show_plots  :
-        verbose     :
+        invert_vel  : perform velocity inversion if True (True by default)
+        invert_VsVp : find Vs/Vp ratio rather that Vs (True by default)
+        show_plots  : show various plots during inversion (True by default)
+        verbose     : print information message about inversion progression (True by default)
 
         """
         self.maxit = maxit
@@ -499,7 +509,7 @@ def jointHypoVel(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.ar
         tcal = np.array([])
 
     if np.isscalar(Vinit):
-        V = Vinit + np.matrixlib.zeros(nnodes)
+        V = np.matrixlib.mat(Vinit + np.zeros(nnodes))
         s = np.ones(nnodes)/Vinit
     else:
         V = np.matrixlib.mat(Vinit)
@@ -507,7 +517,7 @@ def jointHypoVel(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.ar
     V = V.reshape(-1,1)
 
     if par.verbose:
-        print(' *** Joint hypocenter-velocity inversion ***\n')
+        print('\n *** Joint hypocenter-velocity inversion ***\n')
 
     if par.invert_vel:
         resV = np.zeros(par.maxit+1)
@@ -542,6 +552,9 @@ def jointHypoVel(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.ar
         Kz1 = sp.hstack((Kz, sp.csr_matrix((nnodes,nsta))))
         KtKz = Kz1.T * Kz1
         nK = spl.norm(KtKx)
+    else:
+        resV = None
+        resLSQR = None
 
     if par.verbose:
         print('\nStarting iterations')
@@ -734,6 +747,21 @@ def jointHypoVel(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.ar
         else:
             tcalc_cal = np.array([])
 
+        r1a = tobs - tcalc
+        if r1a.size > 0:
+            r1 = np.hstack((np.zeros(data.shape[0]-4*nev), tcal - tcalc_cal))
+        else:
+            r1 = caldata[:,1] - tcalc_cal
+
+        if par.show_plots:
+            plt.figure(1)
+            plt.plot(r1a,'o')
+            plt.show(block=False)
+
+        r1 = np.matrixlib.mat( r1.reshape(-1,1) )
+        r1a = np.matrixlib.mat( r1a.reshape(-1,1) )
+
+        resV[-1] = np.linalg.norm(np.hstack((tobs-tcalc, tcal-tcalc_cal)))
 
     return hyp0, V.getA1(), sc, (resV, resLSQR)
 
@@ -921,7 +949,7 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
     sta = np.unique(data[:,2:5], axis=0)
     nsta = sta.shape[0]
     sc_p = np.zeros(nsta)
-    sc_a = np.zeros(nsta)
+    sc_s = np.zeros(nsta)
     hyp0 = hinit.copy()
     nnodes = grid.getNumberOfNodes()
     
@@ -951,14 +979,14 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
         tcal = np.array([])
 
     if np.isscalar(Vinit[0]):
-        Vp = Vinit[0] + np.matrixlib.zeros(nnodes)
+        Vp = np.matrixlib.mat(Vinit[0] + np.zeros(nnodes))
         s_p = np.ones(nnodes)/Vinit[0]
     else:
         Vp = np.matrixlib.mat(Vinit[0])
         s_p = 1./Vinit[0]
     Vp = Vp.reshape(-1,1)
     if np.isscalar(Vinit[1]):
-        Vs = Vinit[1] + np.matrixlib.zeros(nnodes)
+        Vs = np.matrixlib.mat(Vinit[1] + np.zeros(nnodes))
         s_s = np.ones(nnodes)/Vinit[1]
     else:
         Vs = np.matrixlib.mat(Vinit[1])
@@ -967,7 +995,7 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
     V = np.vstack((Vp, Vs))
 
     if par.verbose:
-        print(' *** Joint hypocenter-velocity inversion ***\n')
+        print('\n *** Joint hypocenter-velocity inversion ***\n')
 
     if par.invert_vel:
         resV = np.zeros(par.maxit+1)
@@ -994,12 +1022,14 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
                 sys.stdout.flush()
             if par.invert_VsVp:
                 D = grid.computeD(Vpts[:,1:4])
+                D = sp.hstack((D, sp.csr_matrix(D.shape)))
             else:
                 i_p = Vpts[:,4]==0
                 i_s = Vpts[:,4]==1
                 Dp = grid.computeD(Vpts[i_p,1:4])
                 Ds = grid.computeD(Vpts[i_s,1:4])
-                D = sp.vstack((Dp, Ds))
+                D = sp.block_diag((Dp, Ds))
+                print(Dp.shape, Ds.shape, D.shape)
 
             D1 = sp.hstack((D, sp.csr_matrix((Vpts.shape[0],2*nsta))))
         else:
@@ -1019,6 +1049,9 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
         Kz1 = sp.hstack((Kz, sp.csr_matrix((2*nnodes,2*nsta))))
         KtKz = Kz1.T * Kz1
         nK = spl.norm(KtKx)
+    else:
+        resV = None
+        resLSQR = None
 
     if par.verbose:
         print('\nStarting iterations')
@@ -1063,28 +1096,29 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
                 sys.stdout.flush()
 
             if nev > 0:
-                hyp = np.empty(nttp)
+                hyp = np.empty((nttp,5))
                 for ne in np.arange(nev):
                     indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
-                    indrp = np.nonzero(data[:,0] == evID[ne] and data[:,5] == 0.0)[0]
+                    indrp = np.nonzero(np.logical_and(data[:,0] == evID[ne], indp))[0]
                     for i in indrp:
                         hyp[i,:] = hyp0[indh[0],:]
-                tcalcp, raysp, v0p, Mevp = grid.raytrace(s_p, hyp, data[indrp,2:4])
+                        
+                tcalcp, raysp, v0p, Mevp = grid.raytrace(s_p, hyp, data[indp,2:5])
 
-                hyp = np.empty(ntts)
+                hyp = np.empty((ntts,5))
                 for ne in np.arange(nev):
                     indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
-                    indrs = np.nonzero(data[:,0] == evID[ne] and data[:,5] == 1.0)[0]
+                    indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
                     for i in indrs:
-                        hyp[i,:] = hyp0[indh[0],:]
-                tcalcs, rayss, v0s, Mevs = grid.raytrace(s_s, hyp, data[indrs,2:4])
+                        hyp[i-nttp,:] = hyp0[indh[0],:]
+                tcalcs, rayss, v0s, Mevs = grid.raytrace(s_s, hyp, data[inds,2:5])
 
                 ne = 0
-                indrp = np.nonzero(data[:,0] == evID[ne] and data[:,5] == 0.0)[0]
-                indrs = np.nonzero(data[:,0] == evID[ne] and data[:,5] == 1.0)[0]
+                indrp = np.nonzero(np.logical_and(data[:,0] == evID[ne], data[:,5] == 0.0))[0]
+                indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], data[:,5] == 1.0))[0]
                 for ne in np.arange(1, nev):
-                    indrp = np.hstack((indrp, np.nonzero(data[:,0] == evID[ne] and data[:,5] == 0.0)[0]))
-                    indrs = np.hstack((indrs, np.nonzero(data[:,0] == evID[ne] and data[:,5] == 1.0)[0]))
+                    indrp = np.hstack((indrp, np.nonzero(np.logical_and(data[:,0] == evID[ne], data[:,5] == 0.0))[0]))
+                    indrs = np.hstack((indrs, np.nonzero(np.logical_and(data[:,0] == evID[ne], data[:,5] == 1.0))[0]))
 
                 tcalc = np.hstack((tcalcp, tcalcs))
                 v0 = np.hstack((v0p, v0s))
@@ -1098,8 +1132,16 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
                 Mev = [None] * nev
                 for ne in np.arange(nev):
                     
-                    Mp = sp.csr_matrix(Mevp[ne], shape=(Mevp[ne][2].size-1,nnodes))
-                    Ms = sp.csr_matrix(Mevs[ne], shape=(Mevs[ne][2].size-1,nnodes))
+                    Mp = sp.csr_matrix(Mevp[ne], shape=(Mevp[ne][2].size-1,nnodes+nsta))
+                    Ms = sp.csr_matrix(Mevs[ne], shape=(Mevs[ne][2].size-1,nnodes+nsta))
+
+                    # extract terms for station corrections                    
+                    Mpsc = Mp[:,nnodes:]
+                    Mssc = Ms[:,nnodes:]
+                    Msc = sp.block_diag((Mpsc, Mssc))
+                    # keep only terms for velocity
+                    Mp = Mp[:,:nnodes]
+                    Ms = Ms[:,:nnodes]
                     
                     if par.invert_VsVp:
                         # Block 1991, p. 45
@@ -1110,9 +1152,10 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
                         tmp1 = sp.hstack((Mp, sp.csr_matrix(Mp.shape)))
                         Mev[ne] = sp.vstack((tmp1, tmp2))
                     else:
-                        Mev[ne] = np.block_diag((Mevp[ne], Mevs[ne]))
-                    # add zeros for station corrections
-                    Mev[ne] = sp.hstack((Mev[ne], sp.csr_matrix((Mev[ne].shape[0], 2*nsta))))
+                        Mev[ne] = sp.block_diag((Mevp[ne], Mevs[ne]))
+                    # add terms for station corrections after terms for velocity because
+                    # solution vector contains [Vp Vs sc_p sc_s] in that order
+                    Mev[ne] = sp.hstack((Mev[ne], Msc))
 
             else:
                 tcalc = np.array([])
@@ -1228,10 +1271,15 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
             ind = np.nonzero( np.abs(deltam[:nnodes]) > par.dVp_max )[0]
             for i in ind:
                 deltam[i] = par.dVp_max * np.sign(deltam[i])
+            ind = np.nonzero( np.abs(deltam[nnodes:2*nnodes]) > par.dVs_max )[0]
+            for i in ind:
+                deltam[nnodes+i] = par.dVs_max * np.sign(deltam[nnodes+i])
+            
 
-            V += np.matrixlib.mat(deltam[:nnodes].reshape(-1,1))
+            V += np.matrixlib.mat(deltam[:2*nnodes].reshape(-1,1))
             s = 1. / V.getA1()
-            sc += deltam[nnodes:,0].getA1()
+            sc_p += deltam[2*nnodes:2*nnodes+nsta,0].getA1()
+            sc_s += deltam[2*nnodes+nsta:,0].getA1()
 
 
         if nev > 0:
@@ -1259,8 +1307,23 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
         else:
             tcalc_cal = np.array([])
 
+        r1a = tobs - tcalc
+        if r1a.size > 0:
+            r1 = np.hstack((np.zeros(data.shape[0]-4*nev), tcal - tcalc_cal))
+        else:
+            r1 = caldata[:,1] - tcalc_cal
 
-    return hyp0, V.getA1(), sc, (resV, resLSQR)
+        if par.show_plots:
+            plt.figure(1)
+            plt.plot(r1a,'o')
+            plt.show(block=False)
+
+        r1 = np.matrixlib.mat( r1.reshape(-1,1) )
+        r1a = np.matrixlib.mat( r1a.reshape(-1,1) )
+
+        resV[-1] = np.linalg.norm(np.hstack((tobs-tcalc, tcal-tcalc_cal)))
+
+    return hyp0, V.getA1(), (sc_p, sc_s), (resV, resLSQR)
 
 def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
 
@@ -1390,8 +1453,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
 
 if __name__ == '__main__':
 
-
-    g = Grid3D(np.arange(80., 221., 10.),np.arange(70., 221., 10.),np.arange(0., 91., 10.))
+    g = Grid3D(np.arange(50., 251., 10.),np.arange(70., 271., 10.),np.arange(-20., 111., 10.))
     slowness = 1./4000.0 + np.zeros(g.getNumberOfNodes())
     
     rcv = np.array([[112., 115., 13.],
@@ -1409,21 +1471,10 @@ if __name__ == '__main__':
 
     nev = 15
     src = np.vstack((np.arange(nev),
-                     np.linspace(0., 50., nev) + 2.*np.random.randn(nev),
+                     np.linspace(0., 50., nev) + np.random.randn(nev),
                      130. +  5.*np.random.randn(nev),
                      160. +  5.*np.random.randn(nev),
                       35. + 10.*np.random.randn(nev))).T
-
-
-    src = np.kron(src,np.ones((nsta,1)))
-    rcv = np.kron(np.ones((nev,1)), rcv)
-
-    tt = g.raytrace(slowness, src, rcv)
-
-    noise_variance = 1.e-3;  # 1 ms
-    tt += noise_variance*np.random.randn(tt.size)
-
-    data = np.hstack((src[:,0].reshape((-1,1)), tt.reshape((-1,1)), rcv))
 
     hinit = np.vstack((np.arange(nev),
                        np.linspace(0., 50., nev),
@@ -1431,9 +1482,15 @@ if __name__ == '__main__':
                        160. + 0.1*np.random.randn(nev),
                         35. + 0.1*np.random.randn(nev))).T
 
-    Vinit = 3800.0 + np.zeros((g.getNumberOfNodes(),))
-    Vpts = np.array([[4000.0, 110.0, 110.0, 10.0],
-                     [4000.0, 112.0, 148.0, 11.0]])
+    h_true = src.copy()
+
+    src = np.kron(src,np.ones((nsta,1)))
+    rcv = np.kron(np.ones((nev,1)), rcv)
+
+    tt = g.raytrace(slowness, src, rcv)
+
+    Vpts = np.array([[4000.0, 110.0, 110.0, 10.0, 0],
+                     [4000.0, 112.0, 148.0, 11.0, 0]])
 
 
     ncal = 3
@@ -1444,36 +1501,67 @@ if __name__ == '__main__':
                        5. +     np.random.randn(ncal))).T
 
     cal = np.kron(cal,np.ones((nsta,1)))
-    rcv = np.array([[112., 115., 13.],
-                    [151., 117., 17.],
-                    [180., 115., 16.],
-                    [113., 145., 11.],
-                    [160., 150., 17.],
-                    [185., 149., 15.],
-                    [117., 184., 11.],
-                    [155., 192.,  9.],
-                    [188., 188., 10.],
-                    [188., 186., 30.],
-                    [188., 183., 60.]])
-    rcv = np.kron(np.ones((ncal,1)), rcv)
+    rcv_cal = np.kron(np.ones((ncal,1)), rcv[:nsta,:])
 
-    ind = np.ones(rcv.shape[0], dtype=bool)
+    ind = np.ones(rcv_cal.shape[0], dtype=bool)
     ind[3] = 0
     ind[13] = 0
     ind[15] = 0
     cal = cal[ind,:]
-    rcv = rcv[ind,:]
+    rcv_cal = rcv_cal[ind,:]
 
-    tcal = g.raytrace(slowness, cal, rcv)
-    caldata = np.column_stack((cal[:,0], tcal, rcv, cal[:,2:]))
+    tcal = g.raytrace(slowness, cal, rcv_cal)
+    caldata = np.column_stack((cal[:,0], tcal, rcv_cal, cal[:,2:], np.zeros(tcal.shape)))
 
     Vlim = (3500., 4500., 1.0, 1500., 2500., 1.0)
     dmax = (50., 5., 2.e-3, 25.)
     lagran = (1., 1., 1., 1.)
 
-    par = InvParams(maxit=2, maxit_hypo=10, conv_hypo=2, Vlim=Vlim, dmax=dmax,
-                    lagrangians=lagran, invert_vel=True, verbose=True)
+    noise_variance = 1.e-3;  # 1 ms
+        
 
-    hinit, res = hypoloc(data, 3900., hinit, 15, 5., True)
+    testP = False
+    testPS = True
+    
+    if testP:
+    
+        tt += noise_variance*np.random.randn(tt.size)
+    
+        data = np.hstack((src[:,0].reshape((-1,1)), tt.reshape((-1,1)), rcv))
+    
+        Vinit = 3900.0
+        
+        hinit2, res = hypoloc(data, Vinit, hinit, 15, 1., True)
+        hinit2
+    
+        par = InvParams(maxit=2, maxit_hypo=10, conv_hypo=2, Vlim=Vlim, dmax=dmax,
+                        lagrangians=lagran, invert_vel=True, verbose=True)
+    
+        h, V, sc, res = jointHypoVel(par, g, data, Vinit, hinit2, caldata=caldata, Vpts=Vpts)
 
-    h, V, sc, res = jointHypoVel(par, g, data, Vinit, hinit, caldata=caldata, Vpts=Vpts)
+    if testPS:
+        
+        slowness_s = 1./2200.0 + np.zeros(g.getNumberOfNodes())
+        
+        tt_s = g.raytrace(slowness_s, src, rcv)
+        
+        tt += noise_variance*np.random.randn(tt.size)
+        tt_s += noise_variance*np.random.randn(tt_s.size)
+        
+        # remove some values
+        ind_p = np.ones(tt.shape[0], dtype=bool)
+        ind_p[np.random.randint(ind_p.size,size=25)] = False
+        ind_s = np.ones(tt_s.shape[0], dtype=bool)
+        ind_s[np.random.randint(ind_s.size,size=25)] = False
+        
+        data_p = np.hstack((src[ind_p,0].reshape((-1,1)), tt[ind_p].reshape((-1,1)), rcv[ind_p,:], np.zeros((np.sum(ind_p),1))))
+        data_s = np.hstack((src[ind_s,0].reshape((-1,1)), tt_s[ind_s].reshape((-1,1)), rcv[ind_s,:], np.ones((np.sum(ind_s),1))))
+        
+        data = np.vstack((data_p, data_s))
+        
+        Vinit = (3900.0, 2100.0)
+        
+        hinit2, res = hypolocPS(data, Vinit, hinit, 15, 1., True)
+        print(hinit2)
+        
+        h, V, sc, res = jointHypoVelPS(par, g, data, Vinit, hinit2, caldata=caldata, Vpts=Vpts)
