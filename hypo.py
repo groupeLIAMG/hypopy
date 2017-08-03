@@ -103,7 +103,7 @@ def hypoloc(data, V, hinit, maxit, convh, verbose=False):
                     
         nev += 1
 
-    if par.verbose:
+    if verbose:
         print('\n ** Inversion complete **\n')
         
     return loc, res
@@ -202,7 +202,7 @@ def hypolocPS(data, V, hinit, maxit, convh, verbose=False):
 
         nev += 1
         
-    if par.verbose:
+    if verbose:
         print('\n ** Inversion complete **\n')
         
     return loc, res
