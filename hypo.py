@@ -251,7 +251,7 @@ class Grid3D():
         if hypo.ndim != 2 or rcv.ndim != 2:
             raise ValueError('hypo and rcv should be 2D arrays')
 
-        src = hypo[:,2:]
+        src = hypo[:,2:5]
         if src.shape[1] != 3 or rcv.shape[1] != 3:
             raise ValueError('src and rcv should be ndata x 3')
 
@@ -814,6 +814,12 @@ def _reloc(ne, par, grid, evID, hyp0, data, tobs, s):
             if np.abs(deltah[n]) > par.dx_max:
                 deltah[n] = par.dx_max * np.sign(deltah[n])
 
+        new_hyp = hyp0[indh[0],:].copy()
+        new_hyp[2:4] += deltah
+        if grid.isOutside(new_hyp[2:].reshape((1,3))):
+            print('  Event could not be relocated inside the grid, exiting')
+            return
+
         hyp0[indh[0],2:4] += deltah
 
         if itt == 0:
@@ -869,6 +875,11 @@ def _reloc(ne, par, grid, evID, hyp0, data, tobs, s):
             if np.abs(deltah[n]) > par.dx_max:
                 deltah[n] = par.dx_max * np.sign(deltah[n])
 
+        new_hyp = hyp0[indh[0],1:] + deltah
+        if grid.isOutside(new_hyp[1:].reshape((1,3))):
+            print('  Event could not be relocated inside the grid, exiting')
+            return
+        
         hyp0[indh[0],1:] += deltah
 
         if itt == 0:
@@ -995,7 +1006,7 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
     V = np.vstack((Vp, Vs))
 
     if par.verbose:
-        print('\n *** Joint hypocenter-velocity inversion ***\n')
+        print('\n *** Joint hypocenter-velocity inversion  -- P and S-wave data ***\n')
 
     if par.invert_vel:
         resV = np.zeros(par.maxit+1)
@@ -1278,6 +1289,8 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
 
             V += np.matrixlib.mat(deltam[:2*nnodes].reshape(-1,1))
             s = 1. / V.getA1()
+            s_p = s[:nnodes]
+            s_s = s[nnodes:]
             sc_p += deltam[2*nnodes:2*nnodes+nsta,0].getA1()
             sc_s += deltam[2*nnodes+nsta:,0].getA1()
 
@@ -1288,22 +1301,33 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
                 sys.stdout.flush()
 
             for ne in range(nev):  # TODO: this loop in parallel
-                _relocPS(ne, par, grid, evID, hyp0, data, tobs, s)
+                _relocPS(ne, par, grid, evID, hyp0, data, tobs, (s_p, s_s), (indp, inds))
 
     if par.invert_vel:
         if nev > 0:
-            hyp = np.empty(data.shape)
+            hyp = np.empty((nttp,5))
             for ne in np.arange(nev):
                 indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
-                indr = np.nonzero(data[:,0] == evID[ne])[0]
-                for i in indr:
+                indrp = np.nonzero(np.logical_and(data[:,0] == evID[ne], indp))[0]
+                for i in indrp:
                     hyp[i,:] = hyp0[indh[0],:]
-            tcalc = grid.raytrace(s, hyp, data[:,2:])
+                    
+            tcalcp = grid.raytrace(s_p, hyp, data[indp,2:5])
+            
+            hyp = np.empty((ntts,5))
+            for ne in np.arange(nev):
+                indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+                indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
+                for i in indrs:
+                    hyp[i-nttp,:] = hyp0[indh[0],:]
+            tcalcs = grid.raytrace(s_s, hyp, data[inds,2:5])
+
+            tcalc = np.hstack((tcalcp, tcalcs))
         else:
             tcalc = np.array([])
 
         if ncal > 0:
-            tcalc_cal = grid.raytrace(s, hcal, caldata[:,2:5])
+            tcalc_cal = grid.raytrace(s_p, hcal, caldata[:,2:5])
         else:
             tcalc_cal = np.array([])
 
@@ -1325,39 +1349,61 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
 
     return hyp0, V.getA1(), (sc_p, sc_s), (resV, resLSQR)
 
-def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
+def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s, ind):
 
+    (indp, inds) = ind
+    (s_p, s_s) = s
     if par.verbose:
         print('                Updating event ID {0:d} ({1:d}/{2:d})'.format(int(evID[ne]), ne+1, evID.size))
         print('                  Updating latitude & longitude', end='')
         sys.stdout.flush()
 
     indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
-    indr = np.nonzero(data[:,0] == evID[ne])[0]
+    indrp = np.nonzero(np.logical_and(data[:,0] == evID[ne], indp))[0]
+    indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
+    
+    nstp = np.sum(indrp.size)
+    nsts = np.sum(indrs.size)
 
-    nst = np.sum(indr.size)
+    hypp = np.empty((nstp,5))
+    stnp = np.empty((nstp,3))
+    for i in range(nstp):
+        hypp[i,:] = hyp0[indh[0],:]
+        stnp[i,:] = data[indrp[i],2:5]
+    hyps = np.empty((nsts,5))
+    stns = np.empty((nsts,3))
+    for i in range(nsts):
+        hyps[i,:] = hyp0[indh[0],:]
+        stns[i,:] = data[indrs[i],2:5]
 
-    hyp = np.empty((nst,5))
-    stn = np.empty((nst,3))
-    for i in range(nst):
-        hyp[i,:] = hyp0[indh[0],:]
-        stn[i,:] = data[indr[i],2:]
-
-    H = np.ones((nst,2))
+    H = np.ones((nstp+nsts,2))
     for itt in range(par.maxit_hypo):
-        for i in range(nst):
-            hyp[i,:] = hyp0[indh[0],:]
-        tcalc, rays, v0 = grid.raytrace(s, hyp, stn)
-        for ns in range(nst):
-            raysi = rays[ns]
-            V0 = v0[ns]
+        for i in range(nstp):
+            hypp[i,:] = hyp0[indh[0],:]
+        tcalcp, raysp, v0p = grid.raytrace(s_p, hypp, stnp)
+        for i in range(nsts):
+            hyps[i,:] = hyp0[indh[0],:]
+        tcalcs, rayss, v0s = grid.raytrace(s_s, hyps, stns)
+        for ns in range(nstp):
+            raysi = raysp[ns]
+            V0 = v0p[ns]
 
             d = (raysi[1,:]-hyp0[indh,2:]).flatten()
             ds = np.sqrt( np.sum(d*d) )
             H[ns,0] = -1./V0 * d[0]/ds
             H[ns,1] = -1./V0 * d[1]/ds
+        for ns in range(nsts):
+            raysi = rayss[ns]
+            V0 = v0s[ns]
 
-        r = tobs[indr] - tcalc
+            d = (raysi[1,:]-hyp0[indh,2:]).flatten()
+            ds = np.sqrt( np.sum(d*d) )
+            H[ns+nstp,0] = -1./V0 * d[0]/ds
+            H[ns+nstp,1] = -1./V0 * d[1]/ds
+        
+
+        r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
+        
         x = np.linalg.lstsq(H,r)
         deltah = x[0]
 
@@ -1373,6 +1419,12 @@ def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
         for n in range(2):
             if np.abs(deltah[n]) > par.dx_max:
                 deltah[n] = par.dx_max * np.sign(deltah[n])
+
+        new_hyp = hyp0[indh[0],:].copy()
+        new_hyp[2:4] += deltah
+        if grid.isOutside(new_hyp[2:5].reshape((1,3))):
+            print('  Event could not be relocated inside the grid, exiting')
+            return
 
         hyp0[indh[0],2:4] += deltah
 
@@ -1395,14 +1447,26 @@ def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
         print('                  Updating all hypocenter params', end='')
         sys.stdout.flush()
 
-    H = np.ones((nst,4))
+    H = np.ones((nstp+nsts,4))
     for itt in range(par.maxit_hypo):
-        for i in range(nst):
-            hyp[i,:] = hyp0[indh[0],:]
-        tcalc, rays, v0 = grid.raytrace(s, hyp, stn)
-        for ns in range(nst):
-            raysi = rays[ns]
-            V0 = v0[ns]
+        for i in range(nstp):
+            hypp[i,:] = hyp0[indh[0],:]
+        tcalcp, raysp, v0p = grid.raytrace(s_p, hypp, stnp)
+        for i in range(nsts):
+            hyps[i,:] = hyp0[indh[0],:]
+        tcalcs, rayss, v0s = grid.raytrace(s_s, hyps, stns)
+        for ns in range(nstp):
+            raysi = raysp[ns]
+            V0 = v0p[ns]
+
+            d = (raysi[1,:]-hyp0[indh,2:]).flatten()
+            ds = np.sqrt( np.sum(d*d) )
+            H[ns,1] = -1./V0 * d[0]/ds
+            H[ns,2] = -1./V0 * d[1]/ds
+            H[ns,3] = -1./V0 * d[2]/ds
+        for ns in range(nsts):
+            raysi = rayss[ns]
+            V0 = v0s[ns]
 
             d = (raysi[1,:]-hyp0[indh,2:]).flatten()
             ds = np.sqrt( np.sum(d*d) )
@@ -1410,7 +1474,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
             H[ns,2] = -1./V0 * d[1]/ds
             H[ns,3] = -1./V0 * d[2]/ds
 
-        r = tobs[indr] - tcalc
+        r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
         x = np.linalg.lstsq(H,r)
         deltah = x[0]
 
@@ -1429,6 +1493,11 @@ def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s):
             if np.abs(deltah[n]) > par.dx_max:
                 deltah[n] = par.dx_max * np.sign(deltah[n])
 
+        new_hyp = hyp0[indh[0],1:] + deltah
+        if grid.isOutside(new_hyp[1:].reshape((1,3))):
+            print('  Event could not be relocated inside the grid, exiting')
+            return
+        
         hyp0[indh[0],1:] += deltah
 
         if itt == 0:
@@ -1519,9 +1588,11 @@ if __name__ == '__main__':
 
     noise_variance = 1.e-3;  # 1 ms
         
+    par = InvParams(maxit=2, maxit_hypo=10, conv_hypo=2, Vlim=Vlim, dmax=dmax,
+                    lagrangians=lagran, invert_vel=True, verbose=True)
 
-    testP = False
-    testPS = True
+    testP = True
+    testPS = False
     
     if testP:
     
@@ -1532,11 +1603,7 @@ if __name__ == '__main__':
         Vinit = 3900.0
         
         hinit2, res = hypoloc(data, Vinit, hinit, 15, 1., True)
-        hinit2
-    
-        par = InvParams(maxit=2, maxit_hypo=10, conv_hypo=2, Vlim=Vlim, dmax=dmax,
-                        lagrangians=lagran, invert_vel=True, verbose=True)
-    
+        
         h, V, sc, res = jointHypoVel(par, g, data, Vinit, hinit2, caldata=caldata, Vpts=Vpts)
 
     if testPS:
@@ -1562,6 +1629,5 @@ if __name__ == '__main__':
         Vinit = (3900.0, 2100.0)
         
         hinit2, res = hypolocPS(data, Vinit, hinit, 15, 1., True)
-        print(hinit2)
         
         h, V, sc, res = jointHypoVelPS(par, g, data, Vinit, hinit2, caldata=caldata, Vpts=Vpts)
