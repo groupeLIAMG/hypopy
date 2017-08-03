@@ -38,7 +38,7 @@ def hypoloc(data, V, hinit, maxit, convh, verbose=False):
     """
 
     if verbose:
-        print(' *** Hypocenter inversion ***\n')
+        print('\n *** Hypocenter inversion ***\n')
     evID = np.unique(data[:,0])
     loc = hinit.copy()
     res = np.zeros((evID.size, maxit))
@@ -103,6 +103,9 @@ def hypoloc(data, V, hinit, maxit, convh, verbose=False):
                     
         nev += 1
 
+    if par.verbose:
+        print('\n ** Inversion complete **\n')
+        
     return loc, res
 
 def hypolocPS(data, V, hinit, maxit, convh, verbose=False):
@@ -129,7 +132,7 @@ def hypolocPS(data, V, hinit, maxit, convh, verbose=False):
     """
 
     if verbose:
-        print(' *** Hypocenter inversion  --  P and S-wave data ***\n')
+        print('\n *** Hypocenter inversion  --  P and S-wave data ***\n')
     evID = np.unique(data[:,0])
     loc = hinit.copy()
     res = np.zeros((evID.size, maxit))
@@ -198,6 +201,9 @@ def hypolocPS(data, V, hinit, maxit, convh, verbose=False):
                 sys.stdout.flush()
 
         nev += 1
+        
+    if par.verbose:
+        print('\n ** Inversion complete **\n')
         
     return loc, res
 
@@ -613,6 +619,7 @@ def jointHypoVel(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.ar
             if par.show_plots:
                 plt.figure(1)
                 plt.plot(r1a,'o')
+                plt.title('Residuals - Iteration {0:d}'.format(it+1))
                 plt.show(block=False)
 
             r1 = np.matrixlib.mat( r1.reshape(-1,1) )
@@ -756,6 +763,7 @@ def jointHypoVel(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.ar
         if par.show_plots:
             plt.figure(1)
             plt.plot(r1a,'o')
+            plt.title('Residuals - Final step')
             plt.show(block=False)
 
         r1 = np.matrixlib.mat( r1.reshape(-1,1) )
@@ -763,6 +771,9 @@ def jointHypoVel(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.ar
 
         resV[-1] = np.linalg.norm(np.hstack((tobs-tcalc, tcal-tcalc_cal)))
 
+    if par.verbose:
+        print('\n ** Inversion complete **\n')
+        
     return hyp0, V.getA1(), sc, (resV, resLSQR)
 
 def _reloc(ne, par, grid, evID, hyp0, data, tobs, s):
@@ -1187,6 +1198,12 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
 
             resV[it] = np.linalg.norm(np.hstack((tobs-tcalc, tcal-tcalc_cal)))
 
+            if par.show_plots:
+                plt.figure(1)
+                plt.plot(r1a,'o')
+                plt.title('Residuals - Iteration {0:d}'.format(it+1))
+                plt.show(block=False)
+
             # initializing matrix M; matrix of partial derivatives of velocity dt/dV
             if par.verbose:
                 print('                Building matrix M')
@@ -1340,6 +1357,7 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
         if par.show_plots:
             plt.figure(1)
             plt.plot(r1a,'o')
+            plt.title('Residuals - Final step')
             plt.show(block=False)
 
         r1 = np.matrixlib.mat( r1.reshape(-1,1) )
@@ -1347,6 +1365,9 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
 
         resV[-1] = np.linalg.norm(np.hstack((tobs-tcalc, tcal-tcalc_cal)))
 
+    if par.verbose:
+        print('\n ** Inversion complete **\n')
+        
     return hyp0, V.getA1(), (sc_p, sc_s), (resV, resLSQR)
 
 def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s, ind):
