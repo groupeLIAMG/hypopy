@@ -325,7 +325,7 @@ class Grid3D():
                                        (1. - np.abs(coord[n,2]-self.z[k])/self.dx))
                         ii += 1
 
-            return sp.csr_matrix((vec, (ivec,jvec)), shape=(coord.shape[0], self.getNumberOfNodes()))
+        return sp.csr_matrix((vec, (ivec,jvec)), shape=(coord.shape[0], self.getNumberOfNodes()))
 
     def computeK(self):
         """
