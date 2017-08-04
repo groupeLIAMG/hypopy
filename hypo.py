@@ -1543,77 +1543,207 @@ def _relocPS(ne, par, grid, evID, hyp0, data, tobs, s, ind):
 
 if __name__ == '__main__':
 
-    g = Grid3D(np.arange(50., 251., 10.),np.arange(70., 271., 10.),np.arange(-20., 111., 10.))
+    xmin = 50.
+    xmax = 251.
+    dx = 10.
+    ymin = 70.
+    ymax = 271.
+    zmin = -20.
+    zmax = 111.
+    
+    g = Grid3D(np.arange(xmin,xmax,dx),np.arange(ymin,ymax,dx),np.arange(zmin, zmax, dx))
     slowness = 1./4000.0 + np.zeros(g.getNumberOfNodes())
     
-    rcv = np.array([[112., 115., 13.],
-                    [151., 117., 17.],
-                    [180., 115., 16.],
-                    [113., 145., 11.],
-                    [160., 150., 17.],
-                    [185., 149., 15.],
-                    [117., 184., 11.],
-                    [155., 192.,  9.],
-                    [188., 188., 10.],
-                    [188., 186., 30.],
-                    [188., 183., 60.]])
-    nsta = rcv.shape[0]
-
-    nev = 15
-    src = np.vstack((np.arange(nev),
-                     np.linspace(0., 50., nev) + np.random.randn(nev),
-                     130. +  5.*np.random.randn(nev),
-                     160. +  5.*np.random.randn(nev),
-                      35. + 10.*np.random.randn(nev))).T
-
-    hinit = np.vstack((np.arange(nev),
-                       np.linspace(0., 50., nev),
-                       130. + 0.1*np.random.randn(nev),
-                       160. + 0.1*np.random.randn(nev),
-                        35. + 0.1*np.random.randn(nev))).T
-
-    h_true = src.copy()
-
-    src = np.kron(src,np.ones((nsta,1)))
-    rcv = np.kron(np.ones((nev,1)), rcv)
-
-    tt = g.raytrace(slowness, src, rcv)
-
-    Vpts = np.array([[4000.0, 110.0, 110.0, 10.0, 0],
-                     [4000.0, 112.0, 148.0, 11.0, 0]])
-
-
-    ncal = 3
-    cal = np.vstack((5+np.arange(ncal),
-                     np.zeros(ncal),
-                     160. +  5.*np.random.randn(ncal),
-                     130. +  5.*np.random.randn(ncal),
-                       5. +     np.random.randn(ncal))).T
-
-    cal = np.kron(cal,np.ones((nsta,1)))
-    rcv_cal = np.kron(np.ones((ncal,1)), rcv[:nsta,:])
-
-    ind = np.ones(rcv_cal.shape[0], dtype=bool)
-    ind[3] = 0
-    ind[13] = 0
-    ind[15] = 0
-    cal = cal[ind,:]
-    rcv_cal = rcv_cal[ind,:]
-
-    tcal = g.raytrace(slowness, cal, rcv_cal)
-    caldata = np.column_stack((cal[:,0], tcal, rcv_cal, cal[:,2:], np.zeros(tcal.shape)))
-
-    Vlim = (3500., 4500., 1.0, 1500., 2500., 1.0)
-    dmax = (50., 5., 2.e-3, 25.)
-    lagran = (1., 1., 1., 1.)
-
-    noise_variance = 1.e-3;  # 1 ms
-        
-    par = InvParams(maxit=2, maxit_hypo=10, conv_hypo=2, Vlim=Vlim, dmax=dmax,
-                    lagrangians=lagran, invert_vel=True, verbose=True)
-
+    testK = False
     testP = True
     testPS = False
+
+    if testK:
+        
+        x = np.arange(xmin, xmax, dx)
+        y = np.arange(ymin, ymax, dx)
+        z = np.arange(zmin, zmax, dx)
+
+
+        Kx, Ky, Kz = g.computeK()
+    
+        V = np.ones(g.shape)
+        V[8:12,8:13,4:9] = 2.
+        
+        plt.figure(figsize=(10,8))
+        plt.subplot(221)
+        plt.pcolor(x,z,np.squeeze(V[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.xlabel('X')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(222)
+        plt.pcolor(y,z,np.squeeze(V[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.xlabel('Y')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(223)
+        plt.pcolor(x,y,np.squeeze(V[:,:,6].T), cmap='CMRmap')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        
+        plt.show()
+        
+        
+        dVx = np.reshape(Kx.dot(V.flatten()), g.shape)
+        dVy = np.reshape(Ky.dot(V.flatten()), g.shape)
+        dVz = np.reshape(Kz.dot(V.flatten()), g.shape)
+        
+        K = Kx + Ky + Kz
+        dV = np.reshape(K.dot(V.flatten()), g.shape)
+        
+
+        plt.figure(figsize=(10,8))
+        plt.subplot(221)
+        plt.pcolor(x,z,np.squeeze(dVx[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.xlabel('X')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(222)
+        plt.pcolor(y,z,np.squeeze(dVx[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.xlabel('Y')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(223)
+        plt.pcolor(x,y,np.squeeze(dVx[:,:,6].T), cmap='CMRmap')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        
+        plt.show()
+
+        plt.figure(figsize=(10,8))
+        plt.subplot(221)
+        plt.pcolor(x,z,np.squeeze(dVy[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.xlabel('X')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(222)
+        plt.pcolor(y,z,np.squeeze(dVy[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.xlabel('Y')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(223)
+        plt.pcolor(x,y,np.squeeze(dVy[:,:,6].T), cmap='CMRmap')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        
+        plt.show()
+
+        plt.figure(figsize=(10,8))
+        plt.subplot(221)
+        plt.pcolor(x,z,np.squeeze(dVz[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.xlabel('X')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(222)
+        plt.pcolor(y,z,np.squeeze(dVz[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.xlabel('Y')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(223)
+        plt.pcolor(x,y,np.squeeze(dVz[:,:,6].T), cmap='CMRmap')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        
+        plt.show()
+
+        plt.figure(figsize=(10,8))
+        plt.subplot(221)
+        plt.pcolor(x,z,np.squeeze(dV[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.xlabel('X')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(222)
+        plt.pcolor(y,z,np.squeeze(dV[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.xlabel('Y')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(223)
+        plt.pcolor(x,y,np.squeeze(dV[:,:,6].T), cmap='CMRmap')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        
+        plt.show()
+
+    
+    if testP or testPS:
+
+        
+        rcv = np.array([[112., 115., 13.],
+                        [151., 117., 17.],
+                        [180., 115., 16.],
+                        [113., 145., 11.],
+                        [160., 150., 17.],
+                        [185., 149., 15.],
+                        [117., 184., 11.],
+                        [155., 192.,  9.],
+                        [188., 188., 10.],
+                        [188., 186., 30.],
+                        [188., 183., 60.]])
+        nsta = rcv.shape[0]
+    
+        nev = 15
+        src = np.vstack((np.arange(nev),
+                         np.linspace(0., 50., nev) + np.random.randn(nev),
+                         130. +  5.*np.random.randn(nev),
+                         160. +  5.*np.random.randn(nev),
+                          35. + 10.*np.random.randn(nev))).T
+    
+        hinit = np.vstack((np.arange(nev),
+                           np.linspace(0., 50., nev),
+                           130. + 0.1*np.random.randn(nev),
+                           160. + 0.1*np.random.randn(nev),
+                            35. + 0.1*np.random.randn(nev))).T
+    
+        h_true = src.copy()
+    
+        src = np.kron(src,np.ones((nsta,1)))
+        rcv = np.kron(np.ones((nev,1)), rcv)
+    
+        tt = g.raytrace(slowness, src, rcv)
+    
+        Vpts = np.array([[4000.0, 110.0, 110.0, 10.0, 0],
+                         [4000.0, 112.0, 148.0, 11.0, 0]])
+    
+    
+        ncal = 3
+        cal = np.vstack((5+np.arange(ncal),
+                         np.zeros(ncal),
+                         160. +  5.*np.random.randn(ncal),
+                         130. +  5.*np.random.randn(ncal),
+                           5. +     np.random.randn(ncal))).T
+    
+        cal = np.kron(cal,np.ones((nsta,1)))
+        rcv_cal = np.kron(np.ones((ncal,1)), rcv[:nsta,:])
+    
+        ind = np.ones(rcv_cal.shape[0], dtype=bool)
+        ind[3] = 0
+        ind[13] = 0
+        ind[15] = 0
+        cal = cal[ind,:]
+        rcv_cal = rcv_cal[ind,:]
+    
+        tcal = g.raytrace(slowness, cal, rcv_cal)
+        caldata = np.column_stack((cal[:,0], tcal, rcv_cal, cal[:,2:], np.zeros(tcal.shape)))
+    
+        Vlim = (3500., 4500., 1.0, 1500., 2500., 1.0)
+        dmax = (50., 5., 2.e-3, 25.)
+        lagran = (1., 1., 1., 1.)
+    
+        noise_variance = 1.e-3;  # 1 ms
+            
+        par = InvParams(maxit=2, maxit_hypo=10, conv_hypo=2, Vlim=Vlim, dmax=dmax,
+                        lagrangians=lagran, invert_vel=True, verbose=True)
+
     
     if testP:
     
