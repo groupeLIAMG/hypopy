@@ -413,10 +413,10 @@ class InvParams():
                         dx_max
                         dt_max
                         dVs_max
-        lagrangians :
-                        lmbda :
-                        gamma :
-                        alpha :
+        lagrangians : tuple holding 4 values
+                        lmbda : weight of smoothing constraint
+                        gamma : weight of penalty constraint
+                        alpha : weight of velocity data point constraint
                         wzK   : weight for vertical smoothing (w.r. to horizontal smoothing)
         invert_vel  : perform velocity inversion if True (True by default)
         invert_VsVp : find Vs/Vp ratio rather that Vs (True by default)
