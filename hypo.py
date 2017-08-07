@@ -1032,6 +1032,7 @@ def jointHypoVelPS(par, grid, data, Vinit, hinit, caldata=np.array([]), Vpts=np.
         deltam[:,0] = 0.0
         u1 = sp.csr_matrix(np.ones(2*nnodes+2*nsta).reshape(-1,1))
         u1[:2*nnodes,0] = 0.0
+        u1[(2*nnodes+nsta):,0] = 0.0
 
         if Vpts.size > 0:
 
