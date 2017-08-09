@@ -488,6 +488,8 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                4th column is source easting
                5th column is source northing
                6th column is source elevation
+               *** important ***
+               cal shot data should sorted by cal shot ID first, then by receiver index
     Vpts    : known velocity points, numpy array with 4 columns
                1st column is velocity
                2nd column is easting
@@ -533,8 +535,17 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
         hcal = np.column_stack((caldata[:,0], np.zeros(caldata.shape[0]), caldata[:,3:]))
         tcal = caldata[:,1]
         rcv_cal = np.empty((caldata.shape[0],3))
-        for n in np.arange(caldata.shape[0]):
-            rcv_cal[n,:] = rcv[int(1.e-6+caldata[n,2])]
+        Msc_cal = []
+        for nc in range(ncal):
+            indr = np.nonzero(caldata[:,0] == calID[nc])[0]
+            nst = np.sum(indr.size)
+            for i in indr:
+                rcv_cal[i,:] = rcv[int(1.e-6+caldata[i,2])]
+            if par.use_sc:
+                tmp = np.zeros((nst,nsta))
+                for n in range(nst):
+                    tmp[n,int(1.e-6+caldata[indr[n],2])] = 1.
+                Msc_cal.append(sp.csr_matrix(tmp))
     else:
         ncal = 0
         tcal = np.array([])
@@ -682,7 +693,13 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
 
                 Q, _ = np.linalg.qr(H, mode='complete')
                 T = sp.csr_matrix(Q[:, 4:]).T
-                M = sp.csr_matrix(Mev[ne], shape=(nst,nnodes+nsta))
+                M = sp.csr_matrix(Mev[ne], shape=(nst,nnodes))
+                if par.use_sc:
+                    Msc = np.zeros((nst,nsta))
+                    for ns in range(nst):
+                        Msc[ns,int(1.e-6+data[indr[ns],2])] = 1.
+                    M = sp.hstack((M, Msc))
+                    
                 M = T * M
 
                 if M1 == None:
@@ -695,7 +712,9 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
 
 
             for nc in range(ncal):
-                M = sp.csr_matrix(Mcal[nc], shape=(Mcal[nc][2].size-1, nnodes+nsta))
+                M = sp.csr_matrix(Mcal[nc], shape=(Mcal[nc][2].size-1, nnodes))
+                if par.use_sc:
+                    M = sp.hstack((M, Msc_cal[nc]))
                 if M1 == None:
                     M1 = M
                 else:
@@ -1812,6 +1831,7 @@ if __name__ == '__main__':
 #        par.maxit = 1
 #        h, V, sc, res = jointHypoVel(par, g, data, rcv, Vp.flatten(), hinit2)
 
+        par.use_sc = False
         h, V, sc, res = jointHypoVel(par, g, data, rcv, Vpinit, hinit2, caldata=caldata, Vpts=Vpts)
 
         plt.figure()
