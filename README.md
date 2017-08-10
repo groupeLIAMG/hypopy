@@ -1,6 +1,6 @@
 # hypopy
 
-Python 3 codes to do hypocenter location from arrival time data
+PYthon codes to do HYPOcenter location from arrival time data
 
 There are currently 4 hypocenter location functions in the hypo module
 
@@ -12,6 +12,8 @@ There are currently 4 hypocenter location functions in the hypo module
 See the tutorial for some examples
 
 ## Requirements
+
+Development is made with python version 3.5
 
 You need to compile the python wrapper for the C++ raytracing code in https://github.com/groupeLIAMG/ttcr and add it to your PYTHONPATH to be able to run hypo.py
 
