@@ -1,6 +1,6 @@
 # hypopy
 
-PYthon codes to do HYPOcenter location from arrival time data
+HYPOcenter location from arrival time data in PYthon
 
 There are currently 4 hypocenter location functions in the hypo module
 
@@ -9,7 +9,7 @@ There are currently 4 hypocenter location functions in the hypo module
 - **jointHypoVel** : Joint hypocenter-velocity inversion on a regular grid (cubic cells)
 - **jointHypoVelPS** : Joint hypocenter-velocity inversion of P- and S-wave arrival time data
 
-See the tutorial for some examples
+See the tutorials for some examples.  There is also a notebook about the theory.
 
 ## Requirements
 
