@@ -401,7 +401,7 @@ class Grid3D():
         Kz = sp.csr_matrix((val,(iK,jK)))
 
         return Kx, Ky, Kz
-    
+
     def toXdmf(self, field, fieldname, filename):
         """
         Save a field in xdmf format (http://www.xdmf.org/index.php/Main_Page)
@@ -420,7 +420,7 @@ class Grid3D():
         nx = self.x.size
         ny = self.y.size
         nz = self.z.size
-        
+
         f = open(filename+'.xmf','w')
 
         f.write('<?xml version="1.0" ?>\n')
@@ -627,8 +627,9 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
         deltam = sp.csr_matrix(np.ones(nnodes+nsta).reshape(-1,1))
         deltam[:,0] = 0.0
         if par.constr_sc:
-            u1 = sp.csr_matrix(np.ones(nnodes+nsta).reshape(-1,1))
+            u1 = np.ones(nnodes+nsta).reshape(-1,1)
             u1[:nnodes,0] = 0.0
+            u1 = sp.csr_matrix(u1)
         else:
             u1 = sp.csr_matrix(np.zeros(nnodes+nsta).reshape(-1,1))
 
@@ -892,7 +893,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
 
     indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
     indr = np.nonzero(data[:,0] == evID[ne])[0]
-    
+
     hyp_save = hyp0[indh[0],:].copy()
 
     nst = np.sum(indr.size)
@@ -1134,13 +1135,13 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         caldatap = caldata[indcalp,:]
         caldatas = caldata[indcals,:]
         caldata = np.vstack((caldatap, caldatas))
-        
+
         hcalp = np.column_stack((caldata[indcalp,0], np.zeros(nttcalp), caldata[indcalp,3:6]))
         hcals = np.column_stack((caldata[indcals,0], np.zeros(nttcals), caldata[indcals,3:6]))
-        
+
         rcv_calp = np.empty((nttcalp,3))
         rcv_cals = np.empty((nttcals,3))
-        
+
         tcal = caldata[:,1]
         Msc_cal = []
         for nc in range(ncal):
@@ -1158,7 +1159,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                     Mpsc[ns,int(1.e-6+caldata[indrp[ns],2])] = 1.
                 for ns in range(indrs.size):
                     Mssc[ns,int(1.e-6+caldata[indrs[ns],2])] = 1.
-                
+
                 Msc_cal.append( sp.block_diag((sp.csr_matrix(Mpsc), sp.csr_matrix(Mssc))) )
 
     else:
@@ -1199,11 +1200,12 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
         deltam = sp.csr_matrix(np.ones(2*nnodes+2*nsta).reshape(-1,1))
         deltam[:,0] = 0.0
-        
+
         if par.constr_sc:
-            u1 = sp.csr_matrix(np.ones(2*nnodes+2*nsta).reshape(-1,1))
+            u1 = np.ones(2*nnodes+2*nsta).reshape(-1,1)
             u1[:2*nnodes,0] = 0.0
             u1[(2*nnodes+nsta):,0] = 0.0
+            u1 = sp.csr_matrix(u1)
         else:
             u1 = sp.csr_matrix(np.zeros(2*nnodes+2*nsta).reshape(-1,1))
 
@@ -1225,7 +1227,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                             break
                     else:
                         raise ValueError('Missing Vp data point for Vs data at ({0:f}, {1:f}, {2:f})'.format(Vpts[i,1], Vpts[i,2], Vpts[i,3]))
-                
+
             else:
                 Vpts2 = Vpts
 
@@ -1264,7 +1266,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
     if par.invert_VsVp:
         VsVpmin = par.Vsmin/par.Vpmax
         VsVpmax = par.Vsmax/par.Vpmin
-        
+
     if par.verbose:
         print('\nStarting iterations')
 
@@ -1302,7 +1304,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                         dP[n,n] = par.PAs
                     else:
                         P[n,0] = 0.0
-                        dP[n,n] = 0.0                    
+                        dP[n,n] = 0.0
                 else:
                     if Vs[n-nnodes,0] < par.Vsmin:
                         P[n,0] = par.PAs * (par.Vsmin-Vs[n-nnodes,0])
@@ -1380,7 +1382,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                             Mpsc[ns,int(1.e-6+data[indrp[ns],2])] = 1.
                         for ns in range(indrs.size):
                             Mssc[ns,int(1.e-6+data[indrs[ns],2])] = 1.
-                            
+
                         Msc = sp.block_diag((sp.csr_matrix(Mpsc), sp.csr_matrix(Mssc)))
                         # add terms for station corrections after terms for velocity because
                         # solution vector contains [Vp Vs sc_p sc_s] in that order
@@ -1464,7 +1466,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                     Ms = sp.csr_matrix(Ms_cal[nc], shape=(Ms_cal[nc][2].size-1, nnodes))
                 else:
                     Ms = sp.csr_matrix([])
-                
+
                 if par.invert_VsVp:
                     if nttcals > 0:
                         # Block 1991, p. 45
@@ -1477,10 +1479,10 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                         M = sp.hstack((Mp, sp.csr_matrix(Mp.shape)))
                 else:
                     M = sp.block_diag((Mp, Ms))
-                                        
+
                 if par.use_sc:
                     M = sp.hstack((M, Msc_cal[nc]))
-                    
+
                 if M1 == None:
                     M1 = M
                 else:
@@ -1603,7 +1605,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         r1 = tcal - tcalc_cal
         if r1a.size > 0:
             r1 = np.hstack((np.zeros(data.shape[0]-4*nev), r1))
-            
+
 
         if par.show_plots:
             plt.figure(1)
@@ -1634,7 +1636,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
     indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
     indrp = np.nonzero(np.logical_and(data[:,0] == evID[ne], indp))[0]
     indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
-    
+
     hyp_save = hyp0[indh[0],:].copy()
 
     nstp = np.sum(indrp.size)
@@ -1666,7 +1668,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
             for ns in range(nstp):
                 raysi = raysp[ns]
                 V0 = v0p[ns]
-    
+
                 d = (raysi[1,:]-hyp0[indh,2:]).flatten()
                 ds = np.sqrt( np.sum(d*d) )
                 H[ns,0] = -1./V0 * d[0]/ds
@@ -1674,18 +1676,18 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
             for ns in range(nsts):
                 raysi = rayss[ns]
                 V0 = v0s[ns]
-    
+
                 d = (raysi[1,:]-hyp0[indh,2:]).flatten()
                 ds = np.sqrt( np.sum(d*d) )
                 H[ns+nstp,0] = -1./V0 * d[0]/ds
                 H[ns+nstp,1] = -1./V0 * d[1]/ds
-    
-    
+
+
             r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
-    
+
             x = np.linalg.lstsq(H,r)
             deltah = x[0]
-    
+
             if np.sum( np.isfinite(deltah) ) != deltah.size:
                 try:
                     U,S,VVh = np.linalg.svd(np.dot(H.T, H)+1e-9*np.eye(2))
@@ -1695,20 +1697,20 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
                     print(' - Event could not be relocated, resetting and exiting')
                     hyp0[indh[0],:] = hyp_save
                     return
-    
+
     #        for n in range(2):
     #            if np.abs(deltah[n]) > par.dx_max:
     #                deltah[n] = par.dx_max * np.sign(deltah[n])
-    
+
             new_hyp = hyp0[indh[0],:].copy()
             new_hyp[2:4] += deltah
             if grid.isOutside(new_hyp[2:5].reshape((1,3))):
                 print('  Event could not be relocated inside the grid, resetting and exiting')
                 hyp0[indh[0],:] = hyp_save
                 return
-    
+
             hyp0[indh[0],2:4] += deltah
-    
+
             if np.sum(np.abs(deltah)<par.conv_hypo) == 2:
                 if par.verbose:
                     print(' - converged at iteration '+str(itt+1))
@@ -1965,7 +1967,7 @@ if __name__ == '__main__':
             return 4.0 + 10.*(z-0.050)
         def Vz2(z):
             return 4.0 + 7.5*(z-0.050)
-        
+
         Vp = np.kron(Vz(z), np.ones((g.shape[0], g.shape[1], 1)))
         Vpinit = np.kron(Vz2(z), np.ones((g.shape[0], g.shape[1], 1)))
         Vs = 2.1
@@ -1989,7 +1991,7 @@ if __name__ == '__main__':
 
         Vinit = np.mean(Vpts[:,0])
         Vpinit = Vpinit.flatten()
-        
+
 
         ncal = 5
         src_cal = np.vstack((5+np.arange(ncal),
@@ -2020,13 +2022,13 @@ if __name__ == '__main__':
         Vsmax = 2.3
         PAs = 1.0
         Vlim = (Vpmin, Vpmax, PAp, Vsmin, Vsmax, PAs)
-        
+
         dVp_max = 0.1
         dx_max = 0.01
         dt_max = 0.01
         dVs_max = 0.1
         dmax = (dVp_max, dx_max, dt_max, dVs_max)
-        
+
         λ = 2.
         γ = 1.
         α = 1.
@@ -2122,7 +2124,7 @@ if __name__ == '__main__':
                            [Vs, 0.192, 0.148, 0.011, 1.0]])
 
         Vpts = np.vstack((Vpts, Vpts_s))
-        
+
         slowness_s = 1./Vs + np.zeros(g.getNumberOfNodes())
 
         tt_s = g.raytrace(slowness_s, src, rcv_data)
@@ -2182,7 +2184,7 @@ if __name__ == '__main__':
         plt.ylabel(r'$\Delta t$')
         plt.xlabel('Event ID')
         plt.legend()
-        
+
         plt.show(block=False)
 
         V3d = V[0].reshape(g.shape)
