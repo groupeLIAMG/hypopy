@@ -624,8 +624,9 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
         dP = sp.csr_matrix((np.ones(nnodes), (np.arange(nnodes,dtype=np.int64),
                                      np.arange(nnodes,dtype=np.int64))), shape=(nnodes,nnodes))
 
-        deltam = sp.csr_matrix(np.ones(nnodes+nsta).reshape(-1,1))
+        deltam = np.ones(nnodes+nsta).reshape(-1,1)
         deltam[:,0] = 0.0
+        deltam = sp.csr_matrix(deltam)
         if par.constr_sc:
             u1 = np.ones(nnodes+nsta).reshape(-1,1)
             u1[:nnodes,0] = 0.0
@@ -1198,8 +1199,9 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                             np.arange(2*nnodes,dtype=np.int64))),
                             shape=(2*nnodes,2*nnodes))
 
-        deltam = sp.csr_matrix(np.ones(2*nnodes+2*nsta).reshape(-1,1))
+        deltam = np.ones(2*nnodes+2*nsta).reshape(-1,1)
         deltam[:,0] = 0.0
+        deltam = sp.csr_matrix(deltam)
 
         if par.constr_sc:
             u1 = np.ones(2*nnodes+2*nsta).reshape(-1,1)
