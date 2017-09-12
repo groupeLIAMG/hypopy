@@ -1529,6 +1529,9 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                 A += α * tmp5
                 b += α * D1.T * (Vpts2[:,0].reshape(-1,1) - D*V )
 
+            if par.verbose:
+                print('                  calling minres with system of size {0:d} x {1:d}'.format(A.shape[0], A.shape[1]))
+                sys.stdout.flush()
             x = spl.minres(A, b.getA1())
 
             deltam = np.matrix(x[0].reshape(-1,1))
