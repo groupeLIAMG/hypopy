@@ -648,12 +648,12 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
             sys.stdout.flush()
         Kx, Ky, Kz = grid.computeK()
         Kx1 = sp.hstack((Kx, sp.csr_matrix((nnodes,nsta))))
-        KtKx = Kx1.T * Kx1
+        KtK = Kx1.T * Kx1
         Ky1 = sp.hstack((Ky, sp.csr_matrix((nnodes,nsta))))
-        KtKy = Ky1.T * Ky1
+        KtK += Ky1.T * Ky1
         Kz1 = sp.hstack((Kz, sp.csr_matrix((nnodes,nsta))))
-        KtKz = Kz1.T * Kz1
-        nK = spl.norm(KtKx)
+        KtK += par.wzK * Kz1.T * Kz1
+        nK = spl.norm(KtK)
     else:
         resV = None
         resAxb = None
@@ -794,33 +794,36 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
 
             # compute A & h for inversion
 
-            tmp1 = M1.T * M1
-            nM = spl.norm(tmp1)
-            tmp3 = dP1.T * dP1
-            nP = spl.norm(tmp3)
-            tmp4 = u1 * u1.T
+            A = M1.T * M1
+            nM = spl.norm(A)
 
             λ = par.λ * nM / nK
+
+            A += λ*KtK
+
+            tmp = dP1.T * dP1
+            nP = spl.norm(tmp)
             if nP != 0.0:
                 γ = par.γ * nM / nP
             else:
                 γ = par.γ
 
-            A = tmp1 + λ*KtKx + λ*KtKy + par.wzK*λ*KtKz + γ*tmp3 + tmp4
+            A += γ*tmp
+            A += u1 * u1.T
 
-            tmp1 = M1.T * r1
+            b = M1.T * r1
             tmp2x = Kx1.T * cx
             tmp2y = Ky1.T * cy
             tmp2z = Kz1.T * cz
             tmp3 = dP1.T * P
-            tmp4 = u1 * s
-            b = tmp1 - λ*tmp2x - λ*tmp2y - par.wzK*λ*tmp2z - γ*tmp3 - tmp4
+            tmp = u1 * s
+            b += - λ*tmp2x - λ*tmp2y - par.wzK*λ*tmp2z - γ*tmp3 - tmp
 
             if Vpts.shape[0] > 0:
-                tmp5 = D1.T * D1
-                nD = spl.norm(tmp5)
+                tmp = D1.T * D1
+                nD = spl.norm(tmp)
                 α = par.α * nM / nD
-                A += α * tmp5
+                A += α * tmp
                 b += α * D1.T * (Vpts[:,0].reshape(-1,1) - D*V )
 
             x = spl.minres(A, b.getA1())
@@ -1255,12 +1258,12 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         Ky = sp.block_diag((Ky, Ky))
         Kz = sp.block_diag((Kz, Kz))
         Kx1 = sp.hstack((Kx, sp.csr_matrix((2*nnodes,2*nsta))))
-        KtKx = Kx1.T * Kx1
+        KtK = Kx1.T * Kx1
         Ky1 = sp.hstack((Ky, sp.csr_matrix((2*nnodes,2*nsta))))
-        KtKy = Ky1.T * Ky1
+        KtK += Ky1.T * Ky1
         Kz1 = sp.hstack((Kz, sp.csr_matrix((2*nnodes,2*nsta))))
-        KtKz = Kz1.T * Kz1
-        nK = spl.norm(KtKx)
+        KtK += par.wzK * Kz1.T * Kz1
+        nK = spl.norm(KtK)
     else:
         resV = None
         resAxb = None
@@ -1500,33 +1503,39 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
             # compute A & h for inversion
 
-            tmp1 = M1.T * M1
-            nM = spl.norm(tmp1)
-            tmp3 = dP1.T * dP1
-            nP = spl.norm(tmp3)
-            tmp4 = u1 * u1.T
-
+            A = M1.T * M1
+            print('A0 -> complete')
+            sys.stdout.flush()
+            nM = spl.norm(A)
             λ = par.λ * nM / nK
+
+            A += λ*KtK
+            print('A1 -> complete')
+            sys.stdout.flush()
+
+            tmp = dP1.T * dP1
+            nP = spl.norm(tmp)
             if nP != 0.0:
                 γ = par.γ * nM / nP
             else:
                 γ = par.γ
 
-            A = tmp1 + λ*KtKx + λ*KtKy + par.wzK*λ*KtKz + γ*tmp3 + tmp4
+            A += γ*tmp
+            A += u1 * u1.T
 
-            tmp1 = M1.T * r1
+            b = M1.T * r1
             tmp2x = Kx1.T * cx
             tmp2y = Ky1.T * cy
             tmp2z = Kz1.T * cz
             tmp3 = dP1.T * P
-            tmp4 = u1 * s
-            b = tmp1 - λ*tmp2x - λ*tmp2y - par.wzK*λ*tmp2z - γ*tmp3 - tmp4
+            tmp = u1 * s
+            b += -λ*tmp2x - λ*tmp2y - par.wzK*λ*tmp2z - γ*tmp3 - tmp
 
             if Vpts2.shape[0] > 0:
-                tmp5 = D1.T * D1
-                nD = spl.norm(tmp5)
+                tmp = D1.T * D1
+                nD = spl.norm(tmp)
                 α = par.α * nM / nD
-                A += α * tmp5
+                A += α * tmp
                 b += α * D1.T * (Vpts2[:,0].reshape(-1,1) - D*V )
 
             if par.verbose:
