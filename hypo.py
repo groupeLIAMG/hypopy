@@ -1504,14 +1504,11 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
             # compute A & h for inversion
 
             A = M1.T * M1
-            print('A0 -> complete')
-            sys.stdout.flush()
+
             nM = spl.norm(A)
             λ = par.λ * nM / nK
 
             A += λ*KtK
-            print('A1 -> complete')
-            sys.stdout.flush()
 
             tmp = dP1.T * dP1
             nP = spl.norm(tmp)
