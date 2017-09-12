@@ -639,7 +639,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                 print('Building velocity data point matrix D')
                 sys.stdout.flush()
             D = grid.computeD(Vpts[:,1:])
-            D1 = sp.hstack((D, sp.csr_matrix((Vpts.shape[0],nsta))))
+            D1 = sp.hstack((D, sp.coo_matrix((Vpts.shape[0],nsta)))).tocsr()
         else:
             D = 0.0
 
@@ -647,13 +647,16 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
             print('Building regularization matrix K')
             sys.stdout.flush()
         Kx, Ky, Kz = grid.computeK()
-        Kx1 = sp.hstack((Kx, sp.csr_matrix((nnodes,nsta))))
+        Kx1 = sp.hstack((Kx, sp.coo_matrix((nnodes,nsta)))).tocsr()
         KtK = Kx1.T * Kx1
-        Ky1 = sp.hstack((Ky, sp.csr_matrix((nnodes,nsta))))
+        Ky1 = sp.hstack((Ky, sp.coo_matrix((nnodes,nsta)))).tocsr()
         KtK += Ky1.T * Ky1
-        Kz1 = sp.hstack((Kz, sp.csr_matrix((nnodes,nsta))))
+        Kz1 = sp.hstack((Kz, sp.coo_matrix((nnodes,nsta)))).tocsr()
         KtK += par.wzK * Kz1.T * Kz1
         nK = spl.norm(KtK)
+        Kx = Kx.tocsr()
+        Ky = Ky.tocsr()
+        Kz = Kz.tocsr()
     else:
         resV = None
         resAxb = None
@@ -790,9 +793,11 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
 
             s = -np.sum(sc) # u1.T * deltam
 
-            dP1 = sp.hstack((dP, sp.csr_matrix(np.zeros((nnodes,nsta)))))  # dP prime
+            dP1 = sp.hstack((dP, sp.csr_matrix(np.zeros((nnodes,nsta))))).tocsr()  # dP prime
 
             # compute A & h for inversion
+
+            M1 = M1.tocsr()
 
             A = M1.T * M1
             nM = spl.norm(A)
@@ -1238,15 +1243,15 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
             if par.invert_VsVp:
                 D = grid.computeD(Vpts2[:,1:4])
-                D = sp.hstack((D, sp.csr_matrix(D.shape)))
+                D = sp.hstack((D, sp.coo_matrix(D.shape))).tocsr()
             else:
                 i_p = Vpts2[:,4]==0.0
                 i_s = Vpts2[:,4]==1.0
                 Dp = grid.computeD(Vpts2[i_p,1:4])
                 Ds = grid.computeD(Vpts2[i_s,1:4])
-                D = sp.block_diag((Dp, Ds))
+                D = sp.block_diag((Dp, Ds)).tocsr()
 
-            D1 = sp.hstack((D, sp.csr_matrix((Vpts2.shape[0],2*nsta))))
+            D1 = sp.hstack((D, sp.csr_matrix((Vpts2.shape[0],2*nsta)))).tocsr()
         else:
             D = 0.0
 
@@ -1257,13 +1262,16 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         Kx = sp.block_diag((Kx, Kx))
         Ky = sp.block_diag((Ky, Ky))
         Kz = sp.block_diag((Kz, Kz))
-        Kx1 = sp.hstack((Kx, sp.csr_matrix((2*nnodes,2*nsta))))
+        Kx1 = sp.hstack((Kx, sp.coo_matrix((2*nnodes,2*nsta)))).tocsr()
         KtK = Kx1.T * Kx1
-        Ky1 = sp.hstack((Ky, sp.csr_matrix((2*nnodes,2*nsta))))
+        Ky1 = sp.hstack((Ky, sp.coo_matrix((2*nnodes,2*nsta)))).tocsr()
         KtK += Ky1.T * Ky1
-        Kz1 = sp.hstack((Kz, sp.csr_matrix((2*nnodes,2*nsta))))
+        Kz1 = sp.hstack((Kz, sp.coo_matrix((2*nnodes,2*nsta)))).tocsr()
         KtK += par.wzK * Kz1.T * Kz1
         nK = spl.norm(KtK)
+        Kx = Kx.tocsr()
+        Ky = Ky.tocsr()
+        Kz = Kz.tocsr()
     else:
         resV = None
         resAxb = None
@@ -1499,9 +1507,11 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
             s = -np.sum(sc_p)
 
-            dP1 = sp.hstack((dP, sp.csr_matrix((2*nnodes,2*nsta))))  # dP prime
+            dP1 = sp.hstack((dP, sp.csr_matrix((2*nnodes,2*nsta)))).tocsr()  # dP prime
 
             # compute A & h for inversion
+
+            M1 = M1.tocsr()
 
             A = M1.T * M1
 
