@@ -618,7 +618,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
 
     if par.invert_vel:
         resV = np.zeros(par.maxit+1)
-        resLSQR = np.zeros(par.maxit)
+        resAxb = np.zeros(par.maxit)
 
         P = sp.csr_matrix(np.ones(nnodes).reshape(-1,1))
         dP = sp.csr_matrix((np.ones(nnodes), (np.arange(nnodes,dtype=np.int64),
@@ -656,7 +656,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
         nK = spl.norm(KtKx)
     else:
         resV = None
-        resLSQR = None
+        resAxb = None
 
     if par.verbose:
         print('\nStarting iterations')
@@ -823,10 +823,10 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                 A += α * tmp5
                 b += α * D1.T * (Vpts[:,0].reshape(-1,1) - D*V )
 
-            x = spl.lsqr(A, b.getA1())
+            x = spl.minres(A, b.getA1())
 
             deltam = np.matrix(x[0].reshape(-1,1))
-            resLSQR[it] = x[3]
+            resAxb[it] = np.linalg.norm(A*deltam - b)
 
             dmean = np.mean( np.abs(deltam[:nnodes]) )
             if dmean > par.dVp_max:
@@ -884,7 +884,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
     if par.verbose:
         print('\n ** Inversion complete **\n')
 
-    return hyp0, V.getA1(), sc, (resV, resLSQR)
+    return hyp0, V.getA1(), sc, (resV, resAxb)
 
 def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
 
@@ -1192,7 +1192,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
     if par.invert_vel:
         resV = np.zeros(par.maxit+1)
-        resLSQR = np.zeros(par.maxit)
+        resAxb = np.zeros(par.maxit)
 
         P = sp.csr_matrix(np.ones(2*nnodes).reshape(-1,1))
         dP = sp.csr_matrix((np.ones(2*nnodes), (np.arange(2*nnodes,dtype=np.int64),
@@ -1263,7 +1263,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         nK = spl.norm(KtKx)
     else:
         resV = None
-        resLSQR = None
+        resAxb = None
 
     if par.invert_VsVp:
         VsVpmin = par.Vsmin/par.Vpmax
@@ -1529,10 +1529,10 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                 A += α * tmp5
                 b += α * D1.T * (Vpts2[:,0].reshape(-1,1) - D*V )
 
-            x = spl.lsqr(A, b.getA1())
+            x = spl.minres(A, b.getA1())
 
             deltam = np.matrix(x[0].reshape(-1,1))
-            resLSQR[it] = x[3]
+            resAxb[it] = np.linalg.norm(A*deltam - b)
 
             dmean = np.mean( np.abs(deltam[:nnodes]) )
             if dmean > par.dVp_max:
@@ -1625,7 +1625,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
     if par.verbose:
         print('\n ** Inversion complete **\n')
 
-    return hyp0, (Vp.getA1(), Vs.getA1()), (sc_p, sc_s), (resV, resLSQR)
+    return hyp0, (Vp.getA1(), Vs.getA1()), (sc_p, sc_s), (resV, resAxb)
 
 def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
 
