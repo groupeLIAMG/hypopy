@@ -831,6 +831,9 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                 A += α * tmp
                 b += α * D1.T * (Vpts[:,0].reshape(-1,1) - D*V )
 
+            if par.verbose:
+                print('                  calling minres with system of size {0:d} x {1:d}'.format(A.shape[0], A.shape[1]))
+                sys.stdout.flush()
             x = spl.minres(A, b.getA1())
 
             deltam = np.matrix(x[0].reshape(-1,1))
@@ -1835,9 +1838,9 @@ if __name__ == '__main__':
 
     g = Grid3D(x, y, z)
 
-    testK = False
+    testK = True
     testP = False
-    testPS = True
+    testPS = False
 
     if testK:
 
@@ -2174,7 +2177,7 @@ if __name__ == '__main__':
 
         hinit2, res = hypolocPS(data, rcv, Vinit, hinit, 10, 0.001, True)
 
-        par.save_V = True
+        par.save_V = False
         par.dVs_max = 0.01
         par.invert_VsVp = False
         par.constr_sc = False
