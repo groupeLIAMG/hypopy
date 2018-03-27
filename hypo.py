@@ -1582,10 +1582,10 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
             if par.save_V:
                 if par.verbose:
                     print('                Saving Velocity models')
-                g.toXdmf(Vp.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
+                grid.toXdmf(Vp.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
                 if par.invert_VsVp:
-                    g.toXdmf(VsVp.getA(), 'VsVp', 'VsVp{0:02d}'.format(it+1))
-                g.toXdmf(Vs.getA(), 'Vs', 'Vs{0:02d}'.format(it+1))
+                    grid.toXdmf(VsVp.getA(), 'VsVp', 'VsVp{0:02d}'.format(it+1))
+                grid.toXdmf(Vs.getA(), 'Vs', 'Vs{0:02d}'.format(it+1))
 
         if nev > 0:
             if par.verbose:
