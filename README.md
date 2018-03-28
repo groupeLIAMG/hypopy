@@ -13,7 +13,7 @@ See the tutorials for some examples.  There is also a notebook about the theory.
 
 ## Requirements
 
-Development is made with python version 3.5
+Development is made with python version 3.6
 
 You need to compile the python wrapper for the C++ raytracing code in https://github.com/groupeLIAMG/ttcr and add it to your PYTHONPATH to be able to run hypo.py
 
