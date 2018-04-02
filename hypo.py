@@ -5,6 +5,7 @@ Created on Wed Nov  2 10:29:32 2016
 @author: giroux
 """
 import sys
+from multiprocessing import Process, Queue
 
 import numpy as np
 import numpy.matlib as matlib
@@ -211,6 +212,21 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
 
     return loc, res
 
+def _rt_worker(idx, grid, istart, iend, vTx, Rx, iRx, t0, nout, tt_queue):
+    """
+    worker for spanning raytracing to different processes
+    """
+    # slowness must have been set before raytracing
+    for n in range(istart, iend):
+        t = grid.raytrace(None,
+                          np.atleast_2d(vTx[n, :]),
+                          np.atleast_2d(Rx[iRx[n], :]),
+                          t0[n],
+                          nout=nout,
+                          thread_no=idx)
+        tt_queue.put((t, iRx[n], n))
+    tt_queue.close()
+
 class Grid3D():
     """
     Class for 3D regular grids with cubic voxels
@@ -251,7 +267,6 @@ class Grid3D():
                 np.min(pts[:,1]) < self.y[0] or np.max(pts[:,1]) > self.y[-1] or
                 np.min(pts[:,2]) < self.z[0] or np.max(pts[:,2]) > self.z[-1] )
 
-
     def raytrace(self, slowness, hypo, rcv):
 
         nout = nargout()
@@ -277,6 +292,7 @@ class Grid3D():
         if len(slowness) != self.getNumberOfNodes():
             raise ValueError('Length of slowness vector should equal number of nodes')
 
+        evID = hypo[:,0]
         t0 = hypo[:,1]
 
         if self.cgrid is None:
@@ -284,19 +300,120 @@ class Grid3D():
             ny = len(self.y) - 1
             nz = len(self.z) - 1
 
-            self.cgrid = cgrid3d.Grid3Dcpp(b'node', nx, ny, nz, self.dx,
-                                           self.x[0], self.y[0], self.z[0],
-                                           1.e-15, 20, True, self.nthreads)
+            self.cgrid = cgrid3d.Grid3Drn(nx, ny, nz, self.dx,
+                                          self.x[0], self.y[0], self.z[0],
+                                          1.e-15, 20, True, self.nthreads)
 
-        if nout == 1:
-            tt = self.cgrid.raytrace(slowness, src, rcv, t0, nout)
-            return tt+t0
-        elif nout == 3:
-            tt, rays, v0 = self.cgrid.raytrace(slowness, src, rcv, t0, nout)
-            return tt+t0, rays, v0
-        elif nout == 4:
-            tt, rays, v0, M = self.cgrid.raytrace(slowness, src, rcv, t0, nout)
-            return tt+t0, rays, v0, M
+        eid = np.sort(np.unique(evID))
+        nTx = len(eid)
+        i0 = np.empty((nTx,), dtype=np.int64)
+        for n in range(nTx):
+            for nn in range(evID.size):
+                if eid[n] == evID[nn]:
+                    i0[n] = nn
+                    break
+        
+        vTx = src[i0,:]
+        t0 = t0[i0]
+        iRx = []
+        for i in eid:
+            ii = evID == i
+            iRx.append(ii)
+        
+        self.cgrid.set_slowness(slowness)
+        tt = np.zeros((rcv.shape[0],))
+        if nout >= 3:
+            v0 = np.zeros((rcv.shape[0],))
+            rays = [ [0.0] for n in range(rcv.shape[0])]
+        if nout == 4:
+            M = [ [] for i in range(nTx) ]
+
+        if nTx < 1.5*self.nthreads or self.nthreads == 1:
+            if nout == 1:
+                for n in range(nTx):
+                    t = self.cgrid.raytrace(None,
+                                            np.atleast_2d(vTx[n, :]),
+                                            np.atleast_2d(rcv[iRx[n], :]),
+                                            t0[n],
+                                            nout=nout)
+                    tt[iRx[n]] = t
+                return tt
+            elif nout == 3:
+                for n in range(nTx):
+                    t, r, v = self.cgrid.raytrace(None,
+                                                  np.atleast_2d(vTx[n, :]),
+                                                  np.atleast_2d(rcv[iRx[n], :]),
+                                                  t0[n],
+                                                  nout=nout)
+                    tt[iRx[n]] = t
+                    v0[iRx[n]] = v
+                    ii = np.where(iRx[n])[0]
+                    for nn in range(len(ii)):
+                        rays[ii[nn]] = r[nn]
+                return tt, rays, v0
+            elif nout == 4:
+                for n in range(nTx):
+                    t, r, v, m = self.cgrid.raytrace(None,
+                                                     np.atleast_2d(vTx[n, :]),
+                                                     np.atleast_2d(rcv[iRx[n], :]),
+                                                     t0[n],
+                                                     nout=nout)
+                    tt[iRx[n]] = t
+                    v0[iRx[n]] = v
+                    ii = np.where(iRx[n])[0]
+                    for nn in range(len(ii)):
+                        rays[ii[nn]] = r[nn]
+                    M[n] = m
+                return tt, rays, v0, M
+
+        else:
+            blk_size = np.zeros((self.nthreads,), dtype=np.int64)
+            nj = nTx
+            while nj > 0:
+                for n in range(self.nthreads):
+                    blk_size[n] += 1
+                    nj -= 1
+                    if nj == 0:
+                        break
+        
+            processes = []
+            blk_start = 0
+            tt_queue = Queue()
+
+            for n in range(self.nthreads):
+                blk_end = blk_start + blk_size[n]
+                p = Process(target=_rt_worker,
+                            args=(n, self.cgrid, blk_start, blk_end, vTx, rcv,
+                                  iRx, t0, nout, tt_queue),
+                            daemon=True)
+                processes.append(p)
+                p.start()
+                blk_start += blk_size[n]
+        
+            if nout == 1:
+                for i in range(nTx):
+                    t, ind, n = tt_queue.get()
+                    tt[ind] = t
+                return tt
+            elif nout == 3:
+                for i in range(nTx):
+                    t, iRx, n = tt_queue.get()
+                    tt[iRx] = t[0]
+                    v0[iRx] = t[2]
+                    ind = np.where(iRx)[0]
+                    for nn in range(len(ind)):
+                        rays[ind[nn]] = t[1][nn]
+                return tt, rays, v0
+            elif nout == 4:
+                for i in range(nTx):
+                    t, iRx, n = tt_queue.get()
+                    tt[iRx] = t[0]
+                    v0[iRx] = t[2]
+                    ind = np.where(iRx)[0]
+                    for nn in range(len(ind)):
+                        rays[ind[nn]] = t[1][nn]
+                    M[n] = t[3]
+                return tt, rays, v0, M
 
     def computeD(self, coord):
         """
@@ -524,6 +641,8 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                1st column is event ID number
                2nd column is arrival time
                3rd column is receiver index
+               *** important ***
+               data should sorted by cal ID first, then by receiver index
     rcv:    : coordinates of receivers
                1st column is receiver easting
                2nd column is receiver northing
@@ -599,7 +718,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
             if par.use_sc:
                 tmp = np.zeros((nst,nsta))
                 for n in range(nst):
-                    tmp[n,int(1.e-6+caldata[indr[n],2])] = 1.
+                    tmp[n,int(1.e-6+caldata[indr[n],2])] = 1.0
                 Msc_cal.append(sp.csr_matrix(tmp))
     else:
         ncal = 0
@@ -777,9 +896,8 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                 r1[ir1+np.arange(nst2, dtype=np.int64)] = T.dot(r1a[indr])
                 ir1 += nst2
 
-
             for nc in range(ncal):
-                M = sp.csr_matrix(Mcal[nc], shape=(Mcal[nc][2].size-1, nnodes))
+                M = Mcal[nc]
                 if par.use_sc:
                     M = sp.hstack((M, Msc_cal[nc]))
                 if M1 == None:
@@ -1034,16 +1152,6 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
 
 
 
-
-
-
-
-
-
-
-
-
-
 def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=np.array([])):
     """
     Joint hypocenter-velocity inversion on a regular grid
@@ -1057,6 +1165,8 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                2nd column is arrival time
                3rd column is receiver index
                4th column is code for wave phase: 0 for P-wave and 1 for S-wave
+               *** important ***
+               data should sorted by cal ID first, then by receiver index
     rcv:    : coordinates of receivers
                1st column is receiver easting
                2nd column is receiver northing
@@ -1375,8 +1485,8 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                 Mev = [None] * nev
                 for ne in np.arange(nev):
 
-                    Mp = sp.csr_matrix(Mevp[ne], shape=(Mevp[ne][2].size-1,nnodes))
-                    Ms = sp.csr_matrix(Mevs[ne], shape=(Mevs[ne][2].size-1,nnodes))
+                    Mp = Mevp[ne]
+                    Ms = Mevs[ne]
 
                     if par.invert_VsVp:
                         # Block 1991, p. 45
@@ -1477,9 +1587,9 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
 
             for nc in range(ncal):
-                Mp = sp.csr_matrix(Mp_cal[nc], shape=(Mp_cal[nc][2].size-1, nnodes))
+                Mp = Mp_cal[nc]
                 if nttcals > 0:
-                    Ms = sp.csr_matrix(Ms_cal[nc], shape=(Ms_cal[nc][2].size-1, nnodes))
+                    Ms = Ms_cal[nc]
                 else:
                     Ms = sp.csr_matrix([])
 
@@ -1706,7 +1816,6 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
                 H[ns+nstp,0] = -1./V0 * d[0]/ds
                 H[ns+nstp,1] = -1./V0 * d[1]/ds
 
-
             r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
 
             x = np.linalg.lstsq(H,r)
@@ -1819,8 +1928,6 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
 
 
 
-
-
 if __name__ == '__main__':
 
     xmin = 0.090
@@ -1836,11 +1943,13 @@ if __name__ == '__main__':
     y = np.arange(ymin, ymax, dx)
     z = np.arange(zmin, zmax, dx)
 
-    g = Grid3D(x, y, z)
+    nthreads = 4
+    g = Grid3D(x, y, z, nthreads)
 
-    testK = True
+    testK = False
     testP = False
-    testPS = False
+    testPS = True
+    testParallel = False
 
     if testK:
 
@@ -1954,7 +2063,7 @@ if __name__ == '__main__':
         plt.show()
 
 
-    if testP or testPS:
+    if testP or testPS or testParallel:
 
         rcv = np.array([[0.112, 0.115, 0.013],
                         [0.111, 0.116, 0.040],
@@ -2064,6 +2173,15 @@ if __name__ == '__main__':
         par = InvParams(maxit=3, maxit_hypo=10, conv_hypo=0.001, Vlim=Vlim, dmax=dmax,
                         lagrangians=lagran, invert_vel=True, verbose=True)
 
+    if testParallel:
+        
+        tt = g.raytrace(slowness, src, rcv_data)
+        tt, rays, v0 = g.raytrace(slowness, src, rcv_data)
+        tt, rays, v0, M = g.raytrace(slowness, src, rcv_data)
+        
+        
+        
+        print('done')
 
     if testP:
 
