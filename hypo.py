@@ -82,13 +82,13 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
             r = t - tcalc
             res[nev, it] = np.linalg.norm(r)
 
-            #dh,residuals,rank,s = np.linalg.lstsq( H, r)
-            dh = np.linalg.solve( np.dot(H.T, H), np.dot(H.T, r) )
+            #dh,residuals,rank,s = np.linalg.H.T.dot(( H, r)
+            dh = np.linalg.solve( H.T.dot(H), H.T.dot(r) )
             if not np.all(np.isfinite(dh)):
                 try:
-                    U,S,VVh = np.linalg.svd(np.dot(H.T, H)+1e-9*np.eye(4))
+                    U,S,VVh = np.linalg.svd(H.T.dot(H)+1e-9*np.eye(4))
                     VV = VVh.T
-                    dh = np.dot( VV, np.dot(U.T, np.dot(H.T, r))/S)
+                    dh = np.dot( VV, np.dot(U.T, H.T.dot(r))/S)
                 except np.linalg.linalg.LinAlgError:
                     print('  Event could not be relocated (iteration no '+str(it)+'), skipping')
                     sys.stdout.flush()
@@ -183,12 +183,12 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
             res[nev, it] = np.linalg.norm(r)
 
             #dh,residuals,rank,s = np.linalg.lstsq( H, r)
-            dh = np.linalg.solve( np.dot(H.T, H), np.dot(H.T, r) )
+            dh = np.linalg.solve( H.T.dot(H), H.T.dot(r) )
             if not np.all(np.isfinite(dh)):
                 try:
-                    U,S,VVh = np.linalg.svd(np.dot(H.T, H)+1e-9*np.eye(4))
+                    U,S,VVh = np.linalg.svd(H.T.dot(H)+1e-9*np.eye(4))
                     VV = VVh.T
-                    dh = np.dot( VV, np.dot(U.T, np.dot(H.T, r))/S)
+                    dh = np.dot( VV, np.dot(U.T, H.T.dot(r))/S)
                 except np.linalg.linalg.LinAlgError:
                     print('  Event could not be relocated (iteration no '+str(it)+'), skipping')
                     sys.stdout.flush()
@@ -259,15 +259,18 @@ class Grid3D():
     def ind(self, i, j, k):
         return (i*self.y.size + j)*self.z.size + k
 
-    def isOutside(self, pts):
+    def is_outside(self, pts):
         """
         Return True if at least one point outside grid
         """
         return ( np.min(pts[:,0]) < self.x[0] or np.max(pts[:,0]) > self.x[-1] or
                 np.min(pts[:,1]) < self.y[0] or np.max(pts[:,1]) > self.y[-1] or
                 np.min(pts[:,2]) < self.z[0] or np.max(pts[:,2]) > self.z[-1] )
+        
+    def set_slowness(self, slowness):
+        self.cgrid.set_slowness(slowness)
 
-    def raytrace(self, slowness, hypo, rcv):
+    def raytrace(self, slowness, hypo, rcv, thread_no=None):
 
         nout = nargout()
 
@@ -283,17 +286,15 @@ class Grid3D():
         if src.shape != rcv.shape:
             raise ValueError('src and rcv should be of equal size')
 
-        if self.isOutside(src):
+        if self.is_outside(src):
             raise ValueError('Source point outside grid')
 
-        if self.isOutside(rcv):
+        if self.is_outside(rcv):
             raise ValueError('Receiver outside grid')
 
-        if len(slowness) != self.getNumberOfNodes():
-            raise ValueError('Length of slowness vector should equal number of nodes')
-
-        evID = hypo[:,0]
-        t0 = hypo[:,1]
+        if slowness is not None:
+            if len(slowness) != self.getNumberOfNodes():
+                raise ValueError('Length of slowness vector should equal number of nodes')
 
         if self.cgrid is None:
             nx = len(self.x) - 1
@@ -304,23 +305,40 @@ class Grid3D():
                                           self.x[0], self.y[0], self.z[0],
                                           1.e-15, 20, True, self.nthreads)
 
+        evID = hypo[:,0]
         eid = np.sort(np.unique(evID))
         nTx = len(eid)
+
+        if thread_no is not None:
+            # we should be here for just one event
+            assert nout == 3
+            assert nTx == 1
+            t, r, v = self.cgrid.raytrace(None,
+                                          np.atleast_2d(src[0, :]),
+                                          np.atleast_2d(rcv),
+                                          hypo[0,1],
+                                          nout=nout,
+                                          thread_no=thread_no)
+            v0 = v+np.zeros((rcv.shape[0],))
+            return t, r, v0
+
         i0 = np.empty((nTx,), dtype=np.int64)
         for n in range(nTx):
             for nn in range(evID.size):
                 if eid[n] == evID[nn]:
                     i0[n] = nn
                     break
-        
+
         vTx = src[i0,:]
-        t0 = t0[i0]
+        t0 = hypo[i0,1]
         iRx = []
         for i in eid:
             ii = evID == i
             iRx.append(ii)
-        
-        self.cgrid.set_slowness(slowness)
+
+        if slowness is not None:
+            self.cgrid.set_slowness(slowness)
+
         tt = np.zeros((rcv.shape[0],))
         if nout >= 3:
             v0 = np.zeros((rcv.shape[0],))
@@ -375,7 +393,7 @@ class Grid3D():
                     nj -= 1
                     if nj == 0:
                         break
-        
+
             processes = []
             blk_start = 0
             tt_queue = Queue()
@@ -389,7 +407,7 @@ class Grid3D():
                 processes.append(p)
                 p.start()
                 blk_start += blk_size[n]
-        
+
             if nout == 1:
                 for i in range(nTx):
                     t, ind, n = tt_queue.get()
@@ -419,7 +437,7 @@ class Grid3D():
         """
         Return matrix of interpolation weights for velocity data points constraint
         """
-        if self.isOutside(coord):
+        if self.is_outside(coord):
             raise ValueError('Velocity data point outside grid')
 
         # D is npts x nnodes
@@ -966,14 +984,45 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
             V += np.matrix(deltam[:nnodes].reshape(-1,1))
             s = 1. / V.getA1()
             sc += deltam[nnodes:,0].getA1()
+            
+            grid.set_slowness(s)
 
         if nev > 0:
             if par.verbose:
                 print('Iteration {0:d} - Relocating events'.format(it+1))
                 sys.stdout.flush()
 
-            for ne in range(nev):  # TODO: this loop in parallel
-                _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s)
+            if grid.nthreads == 1 or nev < 1.5*grid.nthreads:
+                for ne in range(nev):
+                    _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs)
+            else:
+                # run in parallel
+                blk_size = np.zeros((grid.nthreads,), dtype=np.int64)
+                nj = nev
+                while nj > 0:
+                    for n in range(grid.nthreads):
+                        blk_size[n] += 1
+                        nj -= 1
+                        if nj == 0:
+                            break
+                processes = []
+                blk_start = 0
+                h_queue = Queue()
+                for n in range(grid.nthreads):
+                    blk_end = blk_start + blk_size[n]
+                    p = Process(target=_rl_worker,
+                                args=(n, blk_start, blk_end, par, grid, evID, hyp0, data, rcv, tobs, h_queue),
+                                daemon=True)
+                    processes.append(p)
+                    p.start()
+                    blk_start += blk_size[n]
+
+                for ne in range(nev):
+                    h, indh = h_queue.get()
+                    hyp0[indh, :] = h
+                    
+                for p in processes:
+                    p.join()
 
     if par.invert_vel:
         if nev > 0:
@@ -1015,23 +1064,29 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
 
     return hyp0, V.getA1(), sc, (resV, resAxb)
 
-def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
+def _rl_worker(thread_no, istart, iend, par, grid, evID, hyp0, data, rcv, tobs, h_queue):
+    for ne in range(istart, iend):
+        h, indh = _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no)
+        h_queue.put((h, indh))
+    h_queue.close()
+
+def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
 
     if par.verbose:
         print('                Updating event ID {0:d} ({1:d}/{2:d})'.format(int(1.e-6+evID[ne]), ne+1, evID.size))
         sys.stdout.flush()
 
-    indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+    indh = np.nonzero(hyp0[:,0] == evID[ne])[0][0]
     indr = np.nonzero(data[:,0] == evID[ne])[0]
 
-    hyp_save = hyp0[indh[0],:].copy()
+    hyp_save = hyp0[indh,:].copy()
 
     nst = np.sum(indr.size)
 
     hyp = np.empty((nst,5))
     stn = np.empty((nst,3))
     for i in range(nst):
-        hyp[i,:] = hyp0[indh[0],:]
+        hyp[i,:] = hyp0[indh,:]
         stn[i,:] = rcv[int(1.e-6+data[indr[i],2]),:]
 
     if par.hypo_2step:
@@ -1041,9 +1096,9 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
         H = np.ones((nst,2))
         for itt in range(par.maxit_hypo):
             for i in range(nst):
-                hyp[i,:] = hyp0[indh[0],:]
+                hyp[i,:] = hyp0[indh,:]
 
-            tcalc, rays, v0 = grid.raytrace(s, hyp, stn)
+            tcalc, rays, v0 = grid.raytrace(None, hyp, stn, thread_no)
             for ns in range(nst):
                 raysi = rays[ns]
                 V0 = v0[ns]
@@ -1054,31 +1109,31 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
                 H[ns,1] = -1./V0 * d[1]/ds
 
             r = tobs[indr] - tcalc
-            x = np.linalg.lstsq(H,r)
+            x = np.linalg.lstsq(H,r,rcond=None)
             deltah = x[0]
 
             if np.sum( np.isfinite(deltah) ) != deltah.size:
                 try:
-                    U,S,VVh = np.linalg.svd(np.dot(H.T, H)+1e-9*np.eye(2))
+                    U,S,VVh = np.linalg.svd(H.T.dot(H)+1e-9*np.eye(2))
                     VV = VVh.T
-                    deltah = np.dot( VV, np.dot(U.T, np.dot(H.T, r))/S)
+                    deltah = np.dot( VV, np.dot(U.T, H.T.dot(r))/S)
                 except np.linalg.linalg.LinAlgError:
                     print(' - Event could not be relocated, resetting and exiting')
-                    hyp0[indh[0],:] = hyp_save
-                    return
+                    hyp0[indh,:] = hyp_save
+                    return hyp_save, indh
 
 #            for n in range(2):
 #                if np.abs(deltah[n]) > par.dx_max:
 #                    deltah[n] = par.dx_max * np.sign(deltah[n])
 
-            new_hyp = hyp0[indh[0],:].copy()
+            new_hyp = hyp0[indh,:].copy()
             new_hyp[2:4] += deltah
-            if grid.isOutside(new_hyp[2:].reshape((1,3))):
+            if grid.is_outside(new_hyp[2:].reshape((1,3))):
                 print('  Event could not be relocated inside the grid, resetting and exiting')
-                hyp0[indh[0],:] = hyp_save
-                return
+                hyp0[indh,:] = hyp_save
+                return hyp_save, indh
 
-            hyp0[indh[0],2:4] += deltah
+            hyp0[indh,2:4] += deltah
 
             if np.sum(np.abs(deltah)<par.conv_hypo) == 2:
                 if par.verbose:
@@ -1098,9 +1153,9 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
     H = np.ones((nst,4))
     for itt in range(par.maxit_hypo):
         for i in range(nst):
-            hyp[i,:] = hyp0[indh[0],:]
+            hyp[i,:] = hyp0[indh,:]
 
-        tcalc, rays, v0 = grid.raytrace(s, hyp, stn)
+        tcalc, rays, v0 = grid.raytrace(None, hyp, stn, thread_no)
         for ns in range(nst):
             raysi = rays[ns]
             V0 = v0[ns]
@@ -1112,18 +1167,18 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
             H[ns,3] = -1./V0 * d[2]/ds
 
         r = tobs[indr] - tcalc
-        x = np.linalg.lstsq(H,r)
+        x = np.linalg.lstsq(H,r,rcond=None)
         deltah = x[0]
 
         if np.sum( np.isfinite(deltah) ) != deltah.size:
             try:
-                U,S,VVh = np.linalg.svd(np.dot(H.T, H)+1e-9*np.eye(4))
+                U,S,VVh = np.linalg.svd(H.T.dot(H)+1e-9*np.eye(4))
                 VV = VVh.T
-                deltah = np.dot( VV, np.dot(U.T, np.dot(H.T, r))/S)
+                deltah = np.dot( VV, np.dot(U.T, H.T.dot(r))/S)
             except np.linalg.linalg.LinAlgError:
                 print('  Event could not be relocated, resetting and exiting')
-                hyp0[indh[0],:] = hyp_save
-                return
+                hyp0[indh,:] = hyp_save
+                return hyp_save, indh
 
 #        if np.abs(deltah[0]) > par.dt_max:
 #            deltah[0] = par.dt_max * np.sign(deltah[0])
@@ -1131,13 +1186,13 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
 #            if np.abs(deltah[n]) > par.dx_max:
 #                deltah[n] = par.dx_max * np.sign(deltah[n])
 
-        new_hyp = hyp0[indh[0],1:] + deltah
-        if grid.isOutside(new_hyp[1:].reshape((1,3))):
+        new_hyp = hyp0[indh,1:] + deltah
+        if grid.is_outside(new_hyp[1:].reshape((1,3))):
             print('  Event could not be relocated inside the grid, resetting and exiting')
-            hyp0[indh[0],:] = hyp_save
-            return
+            hyp0[indh,:] = hyp_save
+            return hyp_save, indh
 
-        hyp0[indh[0],1:] += deltah
+        hyp0[indh,1:] += deltah
 
         if np.sum(np.abs(deltah[1:])<par.conv_hypo) == 3:
             if par.verbose:
@@ -1150,6 +1205,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, s):
             print(' - reached max number of iterations')
             sys.stdout.flush()
 
+    return hyp0[indh,:], indh
 
 
 def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=np.array([])):
@@ -1159,7 +1215,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
     Parameters
     ----------
     par     : instance of InvParams
-    grid    : instance of Grid3D
+    grid    : instances of Grid3D
     data    : a numpy array with 5 columns
                1st column is event ID number
                2nd column is arrival time
@@ -1207,6 +1263,12 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
     res : residuals
     """
 
+    if grid.nthreads > 1:
+        # we need a second instance for parallel computations
+        grid_s = Grid3D(grid.x, grid.y, grid.z, grid.nthreads)
+    else:
+        grid_s = grid
+    
     evID = np.unique(data[:,0])
     nev = evID.size
     if par.use_sc:
@@ -1227,7 +1289,6 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
     datap = data[indp,:]
     datas = data[inds,:]
     data = np.vstack((datap, datas))
-
 
     rcv_datap = np.empty((nttp,3))
     rcv_datas = np.empty((ntts,3))
@@ -1471,7 +1532,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                     indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
                     for i in indrs:
                         hyp[i-nttp,:] = hyp0[indh[0],:]
-                tcalcs, rayss, v0s, Mevs = grid.raytrace(s_s, hyp, rcv_datas)
+                tcalcs, rayss, v0s, Mevs = grid_s.raytrace(s_s, hyp, rcv_datas)
 
                 tcalc = np.hstack((tcalcp, tcalcs))
                 v0 = np.hstack((v0p, v0s))
@@ -1520,7 +1581,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
             if ncal > 0:
                 tcalcp_cal, _, _, Mp_cal = grid.raytrace(s_p, hcalp, rcv_calp)
                 if nttcals > 0:
-                    tcalcs_cal, _, _, Ms_cal = grid.raytrace(s_s, hcals, rcv_cals)
+                    tcalcs_cal, _, _, Ms_cal = grid_s.raytrace(s_s, hcals, rcv_cals)
                     tcalc_cal = np.hstack((tcalcp_cal, tcalcs_cal))
                 else:
                     tcalc_cal = tcalcp_cal
@@ -1584,7 +1645,6 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
                 r1[ir1+np.arange(nst2, dtype=np.int64)] = T.dot(r1a[indr])
                 ir1 += nst2
-
 
             for nc in range(ncal):
                 Mp = Mp_cal[nc]
@@ -1702,9 +1762,36 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                 print('Iteration {0:d} - Relocating events'.format(it+1))
                 sys.stdout.flush()
 
-            for ne in range(nev):  # TODO: this loop in parallel
-                _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, (s_p, s_s), (indp, inds))
+            if grid.nthreads == 1 or nev < 1.5*grid.nthreads:
+                for ne in range(nev):
+                    _relocPS(ne, par, (grid, grid_s), evID, hyp0, data, rcv, tobs, (s_p, s_s), (indp, inds))
+            else:
+                # run in parallel
+                blk_size = np.zeros((grid.nthreads,), dtype=np.int64)
+                nj = nev
+                while nj > 0:
+                    for n in range(grid.nthreads):
+                        blk_size[n] += 1
+                        nj -= 1
+                        if nj == 0:
+                            break
+                processes = []
+                blk_start = 0
+                h_queue = Queue()
+                for n in range(grid.nthreads):
+                    blk_end = blk_start + blk_size[n]
+                    p = Process(target=_rlPS_worker,
+                                args=(n, blk_start, blk_end, par, (grid, grid_s), evID, hyp0,
+                                      data, rcv, tobs, (s_p, s_s), (indp, inds), h_queue),
+                                daemon=True)
+                    processes.append(p)
+                    p.start()
+                    blk_start += blk_size[n]
 
+                for ne in range(nev):
+                    h, indh = h_queue.get()
+                    hyp0[indh, :] = h
+                    
     if par.invert_vel:
         if nev > 0:
             hyp = np.empty((nttp,5))
@@ -1722,7 +1809,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                 indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
                 for i in indrs:
                     hyp[i-nttp,:] = hyp0[indh[0],:]
-            tcalcs = grid.raytrace(s_s, hyp, rcv_datas)
+            tcalcs = grid_s.raytrace(s_s, hyp, rcv_datas)
 
             tcalc = np.hstack((tcalcp, tcalcs))
         else:
@@ -1730,7 +1817,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
         if ncal > 0:
             tcalcp_cal = grid.raytrace(s_p, hcalp, rcv_calp)
-            tcalcs_cal = grid.raytrace(s_s, hcals, rcv_cals)
+            tcalcs_cal = grid_s.raytrace(s_s, hcals, rcv_cals)
             tcalc_cal = np.hstack((tcalcp_cal, tcalcs_cal))
         else:
             tcalc_cal = np.array([])
@@ -1739,7 +1826,6 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         r1 = tcal - tcalc_cal
         if r1a.size > 0:
             r1 = np.hstack((np.zeros(data.shape[0]-4*nev), r1))
-
 
         if par.show_plots:
             plt.figure(1)
@@ -1759,19 +1845,26 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
     return hyp0, (Vp.getA1(), Vs.getA1()), (sc_p, sc_s), (resV, resAxb)
 
-def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
+def _rlPS_worker(thread_no, istart, iend, par, grid, evID, hyp0, data, rcv, tobs, s, ind, h_queue):
+    for ne in range(istart, iend):
+        h, indh = _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no)
+        h_queue.put((h, indh))
+    h_queue.close()
 
+def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None):
+
+    (grid_p, grid_s) = grid
     (indp, inds) = ind
     (s_p, s_s) = s
     if par.verbose:
         print('                Updating event ID {0:d} ({1:d}/{2:d})'.format(int(1.e-6+evID[ne]), ne+1, evID.size))
         sys.stdout.flush()
 
-    indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+    indh = np.nonzero(hyp0[:,0] == evID[ne])[0][0]
     indrp = np.nonzero(np.logical_and(data[:,0] == evID[ne], indp))[0]
     indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
 
-    hyp_save = hyp0[indh[0],:].copy()
+    hyp_save = hyp0[indh,:].copy()
 
     nstp = np.sum(indrp.size)
     nsts = np.sum(indrs.size)
@@ -1779,12 +1872,12 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
     hypp = np.empty((nstp,5))
     stnp = np.empty((nstp,3))
     for i in range(nstp):
-        hypp[i,:] = hyp0[indh[0],:]
+        hypp[i,:] = hyp0[indh,:]
         stnp[i,:] = rcv[int(1.e-6+data[indrp[i],2]),:]
     hyps = np.empty((nsts,5))
     stns = np.empty((nsts,3))
     for i in range(nsts):
-        hyps[i,:] = hyp0[indh[0],:]
+        hyps[i,:] = hyp0[indh,:]
         stns[i,:] = rcv[int(1.e-6+data[indrs[i],2]),:]
 
     if par.hypo_2step:
@@ -1794,11 +1887,11 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
         H = np.ones((nstp+nsts,2))
         for itt in range(par.maxit_hypo):
             for i in range(nstp):
-                hypp[i,:] = hyp0[indh[0],:]
-            tcalcp, raysp, v0p = grid.raytrace(s_p, hypp, stnp)
+                hypp[i,:] = hyp0[indh,:]
+            tcalcp, raysp, v0p = grid_p.raytrace(s_p, hypp, stnp, thread_no)
             for i in range(nsts):
-                hyps[i,:] = hyp0[indh[0],:]
-            tcalcs, rayss, v0s = grid.raytrace(s_s, hyps, stns)
+                hyps[i,:] = hyp0[indh,:]
+            tcalcs, rayss, v0s = grid_s.raytrace(s_s, hyps, stns, thread_no)
             for ns in range(nstp):
                 raysi = raysp[ns]
                 V0 = v0p[ns]
@@ -1818,31 +1911,31 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
 
             r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
 
-            x = np.linalg.lstsq(H,r)
+            x = np.linalg.lstsq(H,r,rcond=None)
             deltah = x[0]
 
             if np.sum( np.isfinite(deltah) ) != deltah.size:
                 try:
-                    U,S,VVh = np.linalg.svd(np.dot(H.T, H)+1e-9*np.eye(2))
+                    U,S,VVh = np.linalg.svd(H.T.dot(H)+1e-9*np.eye(2))
                     VV = VVh.T
-                    deltah = np.dot( VV, np.dot(U.T, np.dot(H.T, r))/S)
+                    deltah = np.dot( VV, np.dot(U.T, H.T.dot(r))/S)
                 except np.linalg.linalg.LinAlgError:
                     print(' - Event could not be relocated, resetting and exiting')
-                    hyp0[indh[0],:] = hyp_save
-                    return
+                    hyp0[indh,:] = hyp_save
+                    return hyp_save, indh
 
     #        for n in range(2):
     #            if np.abs(deltah[n]) > par.dx_max:
     #                deltah[n] = par.dx_max * np.sign(deltah[n])
 
-            new_hyp = hyp0[indh[0],:].copy()
+            new_hyp = hyp0[indh,:].copy()
             new_hyp[2:4] += deltah
-            if grid.isOutside(new_hyp[2:5].reshape((1,3))):
+            if grid_p.is_outside(new_hyp[2:5].reshape((1,3))):
                 print('  Event could not be relocated inside the grid, resetting and exiting')
-                hyp0[indh[0],:] = hyp_save
-                return
+                hyp0[indh,:] = hyp_save
+                return hyp_save, indh
 
-            hyp0[indh[0],2:4] += deltah
+            hyp0[indh,2:4] += deltah
 
             if np.sum(np.abs(deltah)<par.conv_hypo) == 2:
                 if par.verbose:
@@ -1862,11 +1955,11 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
     H = np.ones((nstp+nsts,4))
     for itt in range(par.maxit_hypo):
         for i in range(nstp):
-            hypp[i,:] = hyp0[indh[0],:]
-        tcalcp, raysp, v0p = grid.raytrace(s_p, hypp, stnp)
+            hypp[i,:] = hyp0[indh,:]
+        tcalcp, raysp, v0p = grid_p.raytrace(s_p, hypp, stnp, thread_no)
         for i in range(nsts):
-            hyps[i,:] = hyp0[indh[0],:]
-        tcalcs, rayss, v0s = grid.raytrace(s_s, hyps, stns)
+            hyps[i,:] = hyp0[indh,:]
+        tcalcs, rayss, v0s = grid_s.raytrace(s_s, hyps, stns, thread_no)
         for ns in range(nstp):
             raysi = raysp[ns]
             V0 = v0p[ns]
@@ -1887,18 +1980,18 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
             H[ns+nstp,3] = -1./V0 * d[2]/ds
 
         r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
-        x = np.linalg.lstsq(H,r)
+        x = np.linalg.lstsq(H,r,rcond=None)
         deltah = x[0]
 
         if np.sum( np.isfinite(deltah) ) != deltah.size:
             try:
-                U,S,VVh = np.linalg.svd(np.dot(H.T, H)+1e-9*np.eye(4))
+                U,S,VVh = np.linalg.svd(H.T.dot(H)+1e-9*np.eye(4))
                 VV = VVh.T
-                deltah = np.dot( VV, np.dot(U.T, np.dot(H.T, r))/S)
+                deltah = np.dot( VV, np.dot(U.T, H.T.dot(r))/S)
             except np.linalg.linalg.LinAlgError:
                 print('  Event could not be relocated, resetting and exiting')
-                hyp0[indh[0],:] = hyp_save
-                return
+                hyp0[indh,:] = hyp_save
+                return hyp_save, indh
 
         if np.abs(deltah[0]) > par.dt_max:
             deltah[0] = par.dt_max * np.sign(deltah[0])
@@ -1906,13 +1999,13 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
             if np.abs(deltah[n]) > par.dx_max:
                 deltah[n] = par.dx_max * np.sign(deltah[n])
 
-        new_hyp = hyp0[indh[0],1:] + deltah
-        if grid.isOutside(new_hyp[1:].reshape((1,3))):
+        new_hyp = hyp0[indh,1:] + deltah
+        if grid_p.is_outside(new_hyp[1:].reshape((1,3))):
             print('  Event could not be relocated inside the grid, resetting and exiting')
-            hyp0[indh[0],:] = hyp_save
-            return
+            hyp0[indh,:] = hyp_save
+            return hyp_save, indh
 
-        hyp0[indh[0],1:] += deltah
+        hyp0[indh,1:] += deltah
 
         if np.sum(np.abs(deltah[1:])<par.conv_hypo) == 3:
             if par.verbose:
@@ -1925,7 +2018,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind):
             print(' - reached max number of iterations')
             sys.stdout.flush()
 
-
+    return hyp0[indh,:], indh
 
 
 if __name__ == '__main__':
@@ -1950,6 +2043,7 @@ if __name__ == '__main__':
     testP = False
     testPS = True
     testParallel = False
+    addNoise = True
 
     if testK:
 
@@ -2168,19 +2262,22 @@ if __name__ == '__main__':
         wzK = 0.1
         lagran = (λ, γ, α, wzK)
 
-        noise_variance = 1.e-3;  # 1 ms
+        if addNoise:
+            noise_variance = 1.e-3;  # 1 ms
+        else:
+            noise_variance = 0.0
 
         par = InvParams(maxit=3, maxit_hypo=10, conv_hypo=0.001, Vlim=Vlim, dmax=dmax,
                         lagrangians=lagran, invert_vel=True, verbose=True)
 
     if testParallel:
-        
+
         tt = g.raytrace(slowness, src, rcv_data)
         tt, rays, v0 = g.raytrace(slowness, src, rcv_data)
         tt, rays, v0, M = g.raytrace(slowness, src, rcv_data)
-        
-        
-        
+
+
+
         print('done')
 
     if testP:
@@ -2188,8 +2285,6 @@ if __name__ == '__main__':
         tt += noise_variance*np.random.randn(tt.size)
 
         data = np.hstack((src[:,0].reshape((-1,1)), tt.reshape((-1,1)), ircv_data))
-
-
 
         hinit2, res = hypoloc(data, rcv, Vinit, hinit, 10, 0.001, True)
 
@@ -2289,8 +2384,7 @@ if __name__ == '__main__':
         tcal_s = g.raytrace(slowness_s, src_cal, rcv_cal)
         caldata_s = np.column_stack((src_cal[:,0], tcal_s, ircv_cal, src_cal[:,2:], np.ones(tcal_s.shape)))
         caldata = np.vstack((caldata, caldata_s))
-
-
+        
         Vinit = (Vinit, 2.0)
 
         hinit2, res = hypolocPS(data, rcv, Vinit, hinit, 10, 0.001, True)
