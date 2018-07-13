@@ -660,7 +660,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                2nd column is arrival time
                3rd column is receiver index
                *** important ***
-               data should sorted by cal ID first, then by receiver index
+               data should sorted by event ID first, then by receiver index
     rcv:    : coordinates of receivers
                1st column is receiver easting
                2nd column is receiver northing
@@ -1074,11 +1074,13 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
 
     return hyp0, V.getA1(), sc, (resV, resAxb)
 
+
 def _rl_worker(thread_no, istart, iend, par, grid, evID, hyp0, data, rcv, tobs, h_queue):
     for ne in range(istart, iend):
         h, indh = _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no)
         h_queue.put((h, indh))
     h_queue.close()
+
 
 def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
 
@@ -1232,7 +1234,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                3rd column is receiver index
                4th column is code for wave phase: 0 for P-wave and 1 for S-wave
                *** important ***
-               data should sorted by cal ID first, then by receiver index
+               data should sorted by event ID first, then by receiver index
     rcv:    : coordinates of receivers
                1st column is receiver easting
                2nd column is receiver northing
