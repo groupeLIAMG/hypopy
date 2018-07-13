@@ -749,6 +749,11 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
         V = np.matrix(Vinit)
         s = 1./Vinit
     V = V.reshape(-1,1)
+    
+    if Vpts.size > 0:
+        if Vpts.shape[1] > 4:           # check if we have Vs data in array
+            itmp = Vpts[:, 4] == 0
+            Vpts = Vpts[itmp, :4]       # keep only Vp data
 
     if par.verbose:
         print('\n *** Joint hypocenter-velocity inversion ***\n')
