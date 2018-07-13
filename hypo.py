@@ -985,6 +985,11 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
             s = 1. / V.getA1()
             sc += deltam[nnodes:,0].getA1()
             
+            if par.save_V:
+                if par.verbose:
+                    print('                Saving Velocity model')
+                grid.toXdmf(V.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
+            
             grid.set_slowness(s)
 
         if nev > 0:
