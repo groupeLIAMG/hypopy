@@ -1200,7 +1200,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
 
         new_hyp = hyp0[indh,1:] + deltah
         if grid.is_outside(new_hyp[1:].reshape((1,3))):
-            print('  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(new_hyp[2], new_hyp[3], new_hyp[4]))
+            print('  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(new_hyp[1], new_hyp[2], new_hyp[3]))
             hyp0[indh,:] = hyp_save
             return hyp_save, indh
 
@@ -2013,7 +2013,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None)
 
         new_hyp = hyp0[indh,1:] + deltah
         if grid_p.is_outside(new_hyp[1:].reshape((1,3))):
-            print('  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(new_hyp[2], new_hyp[3], new_hyp[4]))
+            print('  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(new_hyp[1], new_hyp[2], new_hyp[3]))
             hyp0[indh,:] = hyp_save
             return hyp_save, indh
 
