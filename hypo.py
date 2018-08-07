@@ -1134,9 +1134,9 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
                     hyp0[indh,:] = hyp_save
                     return hyp_save, indh
 
-#            for n in range(2):
-#                if np.abs(deltah[n]) > par.dx_max:
-#                    deltah[n] = par.dx_max * np.sign(deltah[n])
+            for n in range(2):
+                if np.abs(deltah[n]) > par.dx_max:
+                    deltah[n] = par.dx_max * np.sign(deltah[n])
 
             new_hyp = hyp0[indh,:].copy()
             new_hyp[2:4] += deltah
@@ -1192,11 +1192,11 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
                 hyp0[indh,:] = hyp_save
                 return hyp_save, indh
 
-#        if np.abs(deltah[0]) > par.dt_max:
-#            deltah[0] = par.dt_max * np.sign(deltah[0])
-#        for n in range(1,4):
-#            if np.abs(deltah[n]) > par.dx_max:
-#                deltah[n] = par.dx_max * np.sign(deltah[n])
+        if np.abs(deltah[0]) > par.dt_max:
+            deltah[0] = par.dt_max * np.sign(deltah[0])
+        for n in range(1,4):
+            if np.abs(deltah[n]) > par.dx_max:
+                deltah[n] = par.dx_max * np.sign(deltah[n])
 
         new_hyp = hyp0[indh,1:] + deltah
         if grid.is_outside(new_hyp[1:].reshape((1,3))):
@@ -1936,9 +1936,9 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None)
                     hyp0[indh,:] = hyp_save
                     return hyp_save, indh
 
-    #        for n in range(2):
-    #            if np.abs(deltah[n]) > par.dx_max:
-    #                deltah[n] = par.dx_max * np.sign(deltah[n])
+            for n in range(2):
+                if np.abs(deltah[n]) > par.dx_max:
+                    deltah[n] = par.dx_max * np.sign(deltah[n])
 
             new_hyp = hyp0[indh,:].copy()
             new_hyp[2:4] += deltah
