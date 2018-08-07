@@ -266,7 +266,7 @@ class Grid3D():
         return ( np.min(pts[:,0]) < self.x[0] or np.max(pts[:,0]) > self.x[-1] or
                 np.min(pts[:,1]) < self.y[0] or np.max(pts[:,1]) > self.y[-1] or
                 np.min(pts[:,2]) < self.z[0] or np.max(pts[:,2]) > self.z[-1] )
-        
+
     def set_slowness(self, slowness):
         self.cgrid.set_slowness(slowness)
 
@@ -749,7 +749,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
         V = np.matrix(Vinit)
         s = 1./Vinit
     V = V.reshape(-1,1)
-    
+
     if Vpts.size > 0:
         if Vpts.shape[1] > 4:           # check if we have Vs data in array
             itmp = Vpts[:, 4] == 0
@@ -989,12 +989,12 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
             V += np.matrix(deltam[:nnodes].reshape(-1,1))
             s = 1. / V.getA1()
             sc += deltam[nnodes:,0].getA1()
-            
+
             if par.save_V:
                 if par.verbose:
                     print('                Saving Velocity model')
                 grid.toXdmf(V.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
-            
+
             grid.set_slowness(s)
 
         if nev > 0:
@@ -1030,7 +1030,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                 for ne in range(nev):
                     h, indh = h_queue.get()
                     hyp0[indh, :] = h
-                    
+
                 for p in processes:
                     p.join()
 
@@ -1141,7 +1141,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
             new_hyp = hyp0[indh,:].copy()
             new_hyp[2:4] += deltah
             if grid.is_outside(new_hyp[2:].reshape((1,3))):
-                print('  Event could not be relocated inside the grid, resetting and exiting')
+                print('  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(new_hyp[2], new_hyp[3], new_hyp[4]))
                 hyp0[indh,:] = hyp_save
                 return hyp_save, indh
 
@@ -1200,7 +1200,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
 
         new_hyp = hyp0[indh,1:] + deltah
         if grid.is_outside(new_hyp[1:].reshape((1,3))):
-            print('  Event could not be relocated inside the grid, resetting and exiting')
+            print('  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(new_hyp[2], new_hyp[3], new_hyp[4]))
             hyp0[indh,:] = hyp_save
             return hyp_save, indh
 
@@ -1280,7 +1280,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         grid_s = Grid3D(grid.x, grid.y, grid.z, grid.nthreads)
     else:
         grid_s = grid
-    
+
     evID = np.unique(data[:,0])
     nev = evID.size
     if par.use_sc:
@@ -1803,7 +1803,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                 for ne in range(nev):
                     h, indh = h_queue.get()
                     hyp0[indh, :] = h
-                    
+
     if par.invert_vel:
         if nev > 0:
             hyp = np.empty((nttp,5))
@@ -1943,7 +1943,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None)
             new_hyp = hyp0[indh,:].copy()
             new_hyp[2:4] += deltah
             if grid_p.is_outside(new_hyp[2:5].reshape((1,3))):
-                print('  Event could not be relocated inside the grid, resetting and exiting')
+                print('  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(new_hyp[2], new_hyp[3], new_hyp[4]))
                 hyp0[indh,:] = hyp_save
                 return hyp_save, indh
 
@@ -2013,7 +2013,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None)
 
         new_hyp = hyp0[indh,1:] + deltah
         if grid_p.is_outside(new_hyp[1:].reshape((1,3))):
-            print('  Event could not be relocated inside the grid, resetting and exiting')
+            print('  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(new_hyp[2], new_hyp[3], new_hyp[4]))
             hyp0[indh,:] = hyp_save
             return hyp_save, indh
 
@@ -2396,7 +2396,7 @@ if __name__ == '__main__':
         tcal_s = g.raytrace(slowness_s, src_cal, rcv_cal)
         caldata_s = np.column_stack((src_cal[:,0], tcal_s, ircv_cal, src_cal[:,2:], np.ones(tcal_s.shape)))
         caldata = np.vstack((caldata, caldata_s))
-        
+
         Vinit = (Vinit, 2.0)
 
         hinit2, res = hypolocPS(data, rcv, Vinit, hinit, 10, 0.001, True)
