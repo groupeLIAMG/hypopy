@@ -11,6 +11,7 @@ import numpy as np
 import numpy.matlib as matlib
 import scipy.sparse as sp
 import scipy.sparse.linalg as spl
+from scipy.linalg import lstsq
 import matplotlib.pyplot  as plt
 
 import h5py
@@ -182,7 +183,7 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
             r = t - tcalc
             res[nev, it] = np.linalg.norm(r)
 
-            #dh,residuals,rank,s = np.linalg.lstsq( H, r)
+            #dh,residuals,rank,s = lsqsq( H, r)
             dh = np.linalg.solve( H.T.dot(H), H.T.dot(r) )
             if not np.all(np.isfinite(dh)):
                 try:
@@ -1121,7 +1122,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
                 H[ns,1] = -1./V0 * d[1]/ds
 
             r = tobs[indr] - tcalc
-            x = np.linalg.lstsq(H,r,rcond=None)
+            x = lstsq(H, r)
             deltah = x[0]
 
             if np.sum( np.isfinite(deltah) ) != deltah.size:
@@ -1179,7 +1180,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
             H[ns,3] = -1./V0 * d[2]/ds
 
         r = tobs[indr] - tcalc
-        x = np.linalg.lstsq(H,r,rcond=None)
+        x = lstsq(H, r)
         deltah = x[0]
 
         if np.sum( np.isfinite(deltah) ) != deltah.size:
@@ -1923,7 +1924,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None)
 
             r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
 
-            x = np.linalg.lstsq(H,r,rcond=None)
+            x = lstsq(H, r)
             deltah = x[0]
 
             if np.sum( np.isfinite(deltah) ) != deltah.size:
@@ -1992,7 +1993,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None)
             H[ns+nstp,3] = -1./V0 * d[2]/ds
 
         r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
-        x = np.linalg.lstsq(H,r,rcond=None)
+        x = lstsq(H, r)
         deltah = x[0]
 
         if np.sum( np.isfinite(deltah) ) != deltah.size:
