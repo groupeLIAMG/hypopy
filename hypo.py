@@ -347,7 +347,7 @@ class Grid3D():
         if nout == 4:
             M = [ [] for i in range(nTx) ]
 
-        if nTx < 1.5*self.nthreads or self.nthreads == 1:
+        if nTx < self.nthreads or self.nthreads == 1:
             if nout == 1:
                 for n in range(nTx):
                     t = self.cgrid.raytrace(None,
@@ -448,17 +448,17 @@ class Grid3D():
         vec = np.zeros(ivec.shape)
 
         for n in np.arange(coord.shape[0]):
-            i1 = int(1.e-6+ (coord[n,0]-self.x[0])/self.dx )
-            i2 = i1+1
-            j1 = int(1.e-6+ (coord[n,1]-self.y[0])/self.dx )
-            j2 = j1+1
-            k1 = int(1.e-6+ (coord[n,2]-self.z[0])/self.dx )
-            k2 = k1+1
+            i1 = int(1.e-6 + (coord[n,0]-self.x[0])/self.dx )
+            i2 = i1 + 1
+            j1 = int(1.e-6 + (coord[n,1]-self.y[0])/self.dx )
+            j2 = j1 + 1
+            k1 = int(1.e-6 + (coord[n,2]-self.z[0])/self.dx )
+            k2 = k1 + 1
 
             ii = 0
-            for i in (i1,i2):
-                for j in (j1,j2):
-                    for k in (k1,k2):
+            for i in (i1, i2):
+                for j in (j1, j2):
+                    for k in (k1, k2):
                         jvec[n*8+ii] = self.ind(i,j,k)
                         vec[n*8+ii] = ((1. - np.abs(coord[n,0]-self.x[i])/self.dx) *
                                        (1. - np.abs(coord[n,1]-self.y[j])/self.dx) *
@@ -917,7 +917,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                 else:
                     M1 = sp.vstack((M1, M))
 
-                r1[ir1+np.arange(nst2, dtype=np.int64)] = T.dot(r1a[indr])
+                r1[ir1 + np.arange(nst2, dtype=np.int64)] = T.dot(r1a[indr])
                 ir1 += nst2
 
             for nc in range(ncal):
@@ -1003,7 +1003,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                 print('Iteration {0:d} - Relocating events'.format(it+1))
                 sys.stdout.flush()
 
-            if grid.nthreads == 1 or nev < 1.5*grid.nthreads:
+            if grid.nthreads == 1 or nev < grid.nthreads:
                 for ne in range(nev):
                     _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs)
             else:
@@ -1659,7 +1659,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                 else:
                     M1 = sp.vstack((M1, M))
 
-                r1[ir1+np.arange(nst2, dtype=np.int64)] = T.dot(r1a[indr])
+                r1[ir1 + np.arange(nst2, dtype=np.int64)] = T.dot(r1a[indr])
                 ir1 += nst2
 
             for nc in range(ncal):
@@ -1778,7 +1778,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                 print('Iteration {0:d} - Relocating events'.format(it+1))
                 sys.stdout.flush()
 
-            if grid.nthreads == 1 or nev < 1.5*grid.nthreads:
+            if grid.nthreads == 1 or nev < grid.nthreads:
                 for ne in range(nev):
                     _relocPS(ne, par, (grid, grid_s), evID, hyp0, data, rcv, tobs, (s_p, s_s), (indp, inds))
             else:
