@@ -1033,6 +1033,9 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
                     hyp0[indh, :] = h
 
                 for p in processes:
+                    p.terminate()
+
+                for p in processes:
                     p.join()
 
     if par.invert_vel:
@@ -1804,6 +1807,12 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                 for ne in range(nev):
                     h, indh = h_queue.get()
                     hyp0[indh, :] = h
+
+                for p in processes:
+                    p.terminate()
+
+                for p in processes:
+                    p.join()
 
     if par.invert_vel:
         if nev > 0:
