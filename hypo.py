@@ -688,6 +688,7 @@ class InvParams():
         self.save_V = save_V
         self.save_rp = save_rp
         self.verbose = verbose
+        self._final_iteration = False
 
 
 def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=np.array([])):
@@ -850,6 +851,8 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
         print('\nStarting iterations')
 
     for it in np.arange(par.maxit):
+
+        par._final_iteration = it == par.maxit-1
 
         if par.invert_vel:
             if par.verbose:
@@ -1266,7 +1269,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
             print(' - reached max number of iterations')
             sys.stdout.flush()
 
-    if par.save_rp and 'vtk' in sys.modules:
+    if par.save_rp and 'vtk' in sys.modules and par._final_iteration:
         if par.verbose:
             print('                  Saving raypaths')
         filename = 'raypaths_ev_{0:d}.vtp'.format(int(1.e-6+evID[ne]))
@@ -1525,6 +1528,8 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         print('\nStarting iterations')
 
     for it in np.arange(par.maxit):
+
+        par._final_iteration = it == par.maxit-1
 
         if par.invert_vel:
             if par.verbose:
@@ -2102,7 +2107,7 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None)
             print(' - reached max number of iterations')
             sys.stdout.flush()
 
-    if par.save_rp and 'vtk' in sys.modules:
+    if par.save_rp and 'vtk' in sys.modules and par._final_iteration:
         if par.verbose:
             print('                  Saving raypaths')
         filename = 'raypaths_P_ev_{0:d}.vtp'.format(int(1.e-6+evID[ne]))
