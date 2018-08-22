@@ -16,15 +16,21 @@ import matplotlib.pyplot  as plt
 
 import h5py
 
+try:
+    import vtk
+    from vtk.util import numpy_support
+except:
+    print('VTK module not found, saving raypaths is disabled')
+
 from utils import nargout
 import cgrid3d
+
 
 def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
     """
     Locate hypocenters for constant velocity model
 
     Parameters
-    ----------
     data  : a numpy array with 5 columns
              first column is event ID number
              second column is arrival time
@@ -112,6 +118,7 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
         print('\n ** Inversion complete **\n')
 
     return loc, res
+
 
 def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
     """
@@ -213,6 +220,7 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
 
     return loc, res
 
+
 def _rt_worker(idx, grid, istart, iend, vTx, Rx, iRx, t0, nout, tt_queue):
     """
     worker for spanning raytracing to different processes
@@ -227,6 +235,7 @@ def _rt_worker(idx, grid, istart, iend, vTx, Rx, iRx, t0, nout, tt_queue):
                           thread_no=idx)
         tt_queue.put((t, iRx[n], n))
     tt_queue.close()
+
 
 class Grid3D():
     """
@@ -586,10 +595,39 @@ class Grid3D():
         h5f.create_dataset(fieldname, data=field.reshape((nz,ny,nx), order='F').astype(np.float32))
         h5f.close()
 
+    def to_vtk(self, field, fieldname, filename):
+        
+        xCoords = numpy_support.numpy_to_vtk(self.x)
+        yCoords = numpy_support.numpy_to_vtk(self.y)
+        zCoords = numpy_support.numpy_to_vtk(self.z)
+        
+        rgrid = vtk.vtkRectilinearGrid()
+        rgrid.SetDimensions(self.x.size, self.y.size, self.z.size)
+        rgrid.SetXCoordinates(xCoords)
+        rgrid.SetYCoordinates(yCoords)
+        rgrid.SetZCoordinates(zCoords)
+        
+        scalar = vtk.vtkDoubleArray()
+        scalar.SetName(fieldname)
+        scalar.SetNumberOfComponents(1)
+        scalar.SetNumberOfTuples(self.getNumberOfNodes())
+        tmp = np.reshape(field, (self.z.size, self.y.size, self.x.size), order='F').flatten()
+        for n in range(field.size):
+            scalar.SetTuple1(n, tmp[n])
+        rgrid.GetPointData().SetScalars(scalar)
+        
+        writer = vtk.vtkXMLRectilinearGridWriter()
+        writer.SetFileName(filename+'.vtr')
+        writer.SetInputData(rgrid)
+        writer.SetDataModeToBinary()
+        writer.Update()
+
+
 class InvParams():
     def __init__(self, maxit, maxit_hypo, conv_hypo, Vlim, dmax, lagrangians,
                  invert_vel=True, invert_VsVp=True, hypo_2step=False,
-                 use_sc=True, constr_sc=True, show_plots=True, save_V=False, verbose=True):
+                 use_sc=True, constr_sc=True, show_plots=True, save_V=False,
+                 save_rp=False, verbose=True):
         """
         maxit       : max number of iterations
         maxit_hypo  :
@@ -616,6 +654,9 @@ class InvParams():
         constr_sc   : Constrain sum of P-wave static corrections to zero
         show_plots  : show various plots during inversion (True by default)
         save_V      : save intermediate velocity models (False by default)
+                        save in vtk format if VTK module can be found, otherwise save in Xdmf format
+        save_rp     : save ray paths (False by default)
+                        VTK module must be installed
         verbose     : print information message about inversion progression (True by default)
 
         """
@@ -645,6 +686,7 @@ class InvParams():
         self.constr_sc = constr_sc
         self.show_plots = show_plots
         self.save_V = save_V
+        self.save_rp = save_rp
         self.verbose = verbose
 
 
@@ -994,7 +1036,10 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
             if par.save_V:
                 if par.verbose:
                     print('                Saving Velocity model')
-                grid.toXdmf(V.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
+                if 'vtk' in sys.modules:
+                    grid.to_vtk(V.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
+                else:
+                    grid.toXdmf(V.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
 
             grid.set_slowness(s)
 
@@ -1220,6 +1265,12 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
         if par.verbose:
             print(' - reached max number of iterations')
             sys.stdout.flush()
+
+    if par.save_rp and 'vtk' in sys.modules:
+        if par.verbose:
+            print('                  Saving raypaths')
+        filename = 'raypaths_ev_{0:d}.vtp'.format(int(1.e-6+evID[ne]))
+        _save_raypaths(rays, filename)
 
     return hyp0[indh,:], indh
 
@@ -1768,10 +1819,19 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
             if par.save_V:
                 if par.verbose:
                     print('                Saving Velocity models')
-                grid.toXdmf(Vp.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
+                if 'vtk' in sys.modules:
+                    grid.to_vtk(Vp.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
+                else:
+                    grid.toXdmf(Vp.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
                 if par.invert_VsVp:
-                    grid.toXdmf(VsVp.getA(), 'VsVp', 'VsVp{0:02d}'.format(it+1))
-                grid.toXdmf(Vs.getA(), 'Vs', 'Vs{0:02d}'.format(it+1))
+                    if 'vtk' in sys.modules:
+                        grid.to_vtk(VsVp.getA(), 'VsVp', 'VsVp{0:02d}'.format(it+1))
+                    else:
+                        grid.toXdmf(VsVp.getA(), 'VsVp', 'VsVp{0:02d}'.format(it+1))
+                if 'vtk' in sys.modules:
+                    grid.to_vtk(Vs.getA(), 'Vs', 'Vs{0:02d}'.format(it+1))
+                else:
+                    grid.toXdmf(Vs.getA(), 'Vs', 'Vs{0:02d}'.format(it+1))
 
         if nev > 0:
             if par.verbose:
@@ -1867,11 +1927,13 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
 
     return hyp0, (Vp.getA1(), Vs.getA1()), (sc_p, sc_s), (resV, resAxb)
 
+
 def _rlPS_worker(thread_no, istart, iend, par, grid, evID, hyp0, data, rcv, tobs, s, ind, h_queue):
     for ne in range(istart, iend):
         h, indh = _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no)
         h_queue.put((h, indh))
     h_queue.close()
+
 
 def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None):
 
@@ -2040,7 +2102,45 @@ def _relocPS(ne, par, grid, evID, hyp0, data, rcv, tobs, s, ind, thread_no=None)
             print(' - reached max number of iterations')
             sys.stdout.flush()
 
+    if par.save_rp and 'vtk' in sys.modules:
+        if par.verbose:
+            print('                  Saving raypaths')
+        filename = 'raypaths_P_ev_{0:d}.vtp'.format(int(1.e-6+evID[ne]))
+        _save_raypaths(raysp, filename)
+        filename = 'raypaths_S_ev_{0:d}.vtp'.format(int(1.e-6+evID[ne]))
+        _save_raypaths(rayss, filename)
+
     return hyp0[indh,:], indh
+
+
+def _save_raypaths(rays, filename):
+    polydata = vtk.vtkPolyData()
+    cellarray = vtk.vtkCellArray()
+    pts = vtk.vtkPoints()
+    npts = 0
+    for n in range(len(rays)):
+        npts += rays[n].shape[0]
+    pts.SetNumberOfPoints(npts)
+    npts = 0
+    for n in range(len(rays)):
+        for np in range(rays[n].shape[0]):
+            pts.InsertPoint(npts, rays[n][np, 0], rays[n][np, 1], rays[n][np, 2])
+            npts += 1
+    polydata.SetPoints(pts)
+    npts = 0
+    for n in range(len(rays)):
+        line = vtk.vtkPolyLine()
+        line.GetPointIds().SetNumberOfIds(rays[n].shape[0])
+        for np in range(rays[n].shape[0]):
+            line.GetPointIds().SetId(np, npts)
+            npts += 1
+        cellarray.InsertNextCell(line)
+    polydata.SetLines(cellarray)
+    writer = vtk.vtkXMLPolyDataWriter()
+    writer.SetFileName(filename)
+    writer.SetInputData(polydata)
+    writer.SetDataModeToBinary()
+    writer.Update()
 
 
 if __name__ == '__main__':
@@ -2411,7 +2511,8 @@ if __name__ == '__main__':
 
         hinit2, res = hypolocPS(data, rcv, Vinit, hinit, 10, 0.001, True)
 
-        par.save_V = False
+        par.save_V = True
+        par.save_rp = True
         par.dVs_max = 0.01
         par.invert_VsVp = False
         par.constr_sc = False

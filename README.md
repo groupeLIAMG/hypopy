@@ -17,6 +17,8 @@ Development is made with python version 3.6
 
 You need to compile the python wrapper for the C++ raytracing code in https://github.com/groupeLIAMG/ttcr and add it to your PYTHONPATH to be able to run hypo.py
 
+If you have VTK compiled with python on your system, it is possible to save velocity models and raypaths for posterior visualization (e.g. in paraview).
+
 ## References
 
 ```
