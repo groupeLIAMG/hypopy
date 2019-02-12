@@ -31,7 +31,7 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
     Locate hypocenters for constant velocity model
 
     Parameters
-    data  : a numpy array with 5 columns
+    data  : a numpy array with 3 columns
              first column is event ID number
              second column is arrival time
              third column is receiver index
