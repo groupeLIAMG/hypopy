@@ -15,6 +15,7 @@ from scipy.linalg import lstsq
 import matplotlib.pyplot  as plt
 
 import h5py
+from scipy.sparse.csr import csr_matrix
 
 try:
     import vtk
@@ -115,7 +116,7 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
         nev += 1
 
     if verbose:
-        print('\n ** Inversion complete **\n')
+        print('\n ** Inversion complete **\n', flush=True)
 
     return loc, res
 
@@ -216,7 +217,7 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
         nev += 1
 
     if verbose:
-        print('\n ** Inversion complete **\n')
+        print('\n ** Inversion complete **\n', flush=True)
 
     return loc, res
 
@@ -262,12 +263,24 @@ class Grid3D():
     def getNumberOfNodes(self):
         return self.x.size * self.y.size * self.z.size
 
+    def getNumberOfCells(self):
+        return (self.x.size-1) * (self.y.size-1) * (self.z.size-1)
+
     @property
     def shape(self):
         return (self.x.size, self.y.size, self.z.size)
 
     def ind(self, i, j, k):
+        """
+        Return node index
+        """
         return (i*self.y.size + j)*self.z.size + k
+
+    def indc(self, i, j, k):
+        """
+        return cell index
+        """
+        return (i*(self.y.size-1) + j)*(self.z.size-1) + k
 
     def is_outside(self, pts):
         """
@@ -278,6 +291,15 @@ class Grid3D():
                 np.min(pts[:,2]) < self.z[0] or np.max(pts[:,2]) > self.z[-1] )
 
     def set_slowness(self, slowness):
+        if self.cgrid is None:
+            nx = len(self.x) - 1
+            ny = len(self.y) - 1
+            nz = len(self.z) - 1
+
+            self.cgrid = cgrid3d.Grid3Drn(nx, ny, nz, self.dx,
+                                          self.x[0], self.y[0], self.z[0],
+                                          1.e-15, 20, True, self.nthreads)
+
         self.cgrid.set_slowness(slowness)
 
     def raytrace(self, slowness, hypo, rcv, thread_no=None):
@@ -319,6 +341,9 @@ class Grid3D():
         eid = np.sort(np.unique(evID))
         nTx = len(eid)
 
+        if slowness is not None:
+            self.cgrid.set_slowness(slowness)
+
         if thread_no is not None:
             # we should be here for just one event
             assert nout == 3
@@ -345,9 +370,6 @@ class Grid3D():
         for i in eid:
             ii = evID == i
             iRx.append(ii)
-
-        if slowness is not None:
-            self.cgrid.set_slowness(slowness)
 
         tt = np.zeros((rcv.shape[0],))
         if nout >= 3:
@@ -623,6 +645,392 @@ class Grid3D():
         writer.Update()
 
 
+class Grid3Dc(Grid3D):
+    """
+    Class for 3D regular grids with cubic voxels of constant slowness
+    """
+    def __init__(self, x, y, z, nthreads=1):
+        """
+        x: node coordinates along x
+        y: node coordinates along y
+        z: node coordinates along z
+        """
+        Grid3D.__init__(self, x, y, z, nthreads)
+        self.slowness = None
+    
+    @property
+    def shape(self):
+        return (self.x.size-1, self.y.size-1, self.z.size-1)
+
+    def set_slowness(self, slowness):
+
+        if self.cgrid is None:
+            nx = len(self.x) - 1
+            ny = len(self.y) - 1
+            nz = len(self.z) - 1
+
+            self.cgrid = cgrid3d.Grid3Drc(nx, ny, nz, self.dx,
+                                          self.x[0], self.y[0], self.z[0],
+                                          1.e-15, 20, True, self.nthreads)
+        self.cgrid.set_slowness(slowness)
+        self.slowness = slowness
+    
+    def raytrace(self, slowness, hypo, rcv, thread_no=None):
+
+        nout = nargout()
+
+        # check input data consistency
+
+        if hypo.ndim != 2 or rcv.ndim != 2:
+            raise ValueError('hypo and rcv should be 2D arrays')
+
+        src = hypo[:,2:5]
+        if src.shape[1] != 3 or rcv.shape[1] != 3:
+            raise ValueError('src and rcv should be ndata x 3')
+
+        if src.shape != rcv.shape:
+            raise ValueError('src and rcv should be of equal size')
+
+        if self.is_outside(src):
+            raise ValueError('Source point outside grid')
+
+        if self.is_outside(rcv):
+            raise ValueError('Receiver outside grid')
+
+        if slowness is not None:
+            if len(slowness) != self.getNumberOfCells():
+                raise ValueError('Length of slowness vector should equal number of cells')
+            self.slowness = slowness
+        
+        if self.cgrid is None:
+            nx = len(self.x) - 1
+            ny = len(self.y) - 1
+            nz = len(self.z) - 1
+
+            self.cgrid = cgrid3d.Grid3Drc(nx, ny, nz, self.dx,
+                                          self.x[0], self.y[0], self.z[0],
+                                          1.e-15, 20, True, self.nthreads)
+        
+        evID = hypo[:,0]
+        eid = np.sort(np.unique(evID))
+        nTx = len(eid)
+        
+        if slowness is not None:
+            self.cgrid.set_slowness(slowness)
+
+        if thread_no is not None:
+            # we should be here for just one event
+            assert nout == 3
+            assert nTx == 1
+            t, r = self.cgrid.raytrace(None,
+                                       np.atleast_2d(src[0, :]),
+                                       np.atleast_2d(rcv),
+                                       hypo[0,1],
+                                       nout=nout-1,
+                                       thread_no=thread_no)
+            v = 1.0 / self.slowness[self.indc(int((src[0,0]-self.x[0])/self.dx),
+                                              int((src[0,1]-self.y[0])/self.dx),
+                                              int((src[0,2]-self.z[0])/self.dx))]
+            v0 = v+np.zeros((rcv.shape[0],))
+            return t, r, v0
+        
+        i0 = np.empty((nTx,), dtype=np.int64)
+        for n in range(nTx):
+            for nn in range(evID.size):
+                if eid[n] == evID[nn]:
+                    i0[n] = nn
+                    break
+
+        vTx = src[i0,:]
+        t0 = hypo[i0,1]
+        iRx = []
+        for i in eid:
+            ii = evID == i
+            iRx.append(ii)
+
+        tt = np.zeros((rcv.shape[0],))
+        if nout >= 3:
+            v0 = np.zeros((rcv.shape[0],))
+            rays = [ [0.0] for n in range(rcv.shape[0])]
+        if nout == 4:
+            L = [ [] for i in range(nTx) ]
+            
+        if nTx < self.nthreads or self.nthreads == 1:
+            if nout == 1:
+                for n in range(nTx):
+                    t = self.cgrid.raytrace(None,
+                                            np.atleast_2d(vTx[n, :]),
+                                            np.atleast_2d(rcv[iRx[n], :]),
+                                            t0[n])
+                    tt[iRx[n]] = t
+                return tt
+            elif nout == 3:
+                for n in range(nTx):
+                    t, r = self.cgrid.raytrace(None,
+                                               np.atleast_2d(vTx[n, :]),
+                                               np.atleast_2d(rcv[iRx[n], :]),
+                                               t0[n],
+                                               nout=nout-1)
+                    v = 1.0 / self.slowness[self.indc(int((vTx[n,0]-self.x[0])/self.dx),
+                                                      int((vTx[n,1]-self.y[0])/self.dx),
+                                                      int((vTx[n,2]-self.z[0])/self.dx))]
+                    tt[iRx[n]] = t
+                    v0[iRx[n]] = v
+                    ii = np.where(iRx[n])[0]
+                    for nn in range(len(ii)):
+                        rays[ii[nn]] = r[nn]
+                return tt, rays, v0
+            elif nout == 4:
+                for n in range(nTx):
+                    t, r, l = self.cgrid.raytrace(None,
+                                                  np.atleast_2d(vTx[n, :]),
+                                                  np.atleast_2d(rcv[iRx[n], :]),
+                                                  t0[n],
+                                                  nout=nout-1)
+                    v = 1.0 / self.slowness[self.indc(int((vTx[n,0]-self.x[0])/self.dx),
+                                                      int((vTx[n,1]-self.y[0])/self.dx),
+                                                      int((vTx[n,2]-self.z[0])/self.dx))]
+                    tt[iRx[n]] = t
+                    v0[iRx[n]] = v
+                    ii = np.where(iRx[n])[0]
+                    for nn in range(len(ii)):
+                        rays[ii[nn]] = r[nn]
+                    L[n] = l
+                return tt, rays, v0, L
+
+        else:
+            blk_size = np.zeros((self.nthreads,), dtype=np.int64)
+            nj = nTx
+            while nj > 0:
+                for n in range(self.nthreads):
+                    blk_size[n] += 1
+                    nj -= 1
+                    if nj == 0:
+                        break
+
+            processes = []
+            blk_start = 0
+            tt_queue = Queue()
+            if nout > 1:
+                nout2 = nout-1
+            else:
+                nout2 = nout
+            
+
+            for n in range(self.nthreads):
+                blk_end = blk_start + blk_size[n]
+                p = Process(target=_rt_worker,
+                            args=(n, self.cgrid, blk_start, blk_end, vTx, rcv,
+                                  iRx, t0, nout2, tt_queue),
+                            daemon=True)
+                processes.append(p)
+                p.start()
+                blk_start += blk_size[n]
+
+            if nout == 1:
+                for i in range(nTx):
+                    t, ind, n = tt_queue.get()
+                    tt[ind] = t
+                return tt
+            elif nout == 3:
+                for i in range(nTx):
+                    t, iRx, n = tt_queue.get()
+                    tt[iRx] = t[0]
+                    v = 1.0 / self.slowness[self.indc(int((vTx[n,0]-self.x[0])/self.dx),
+                                              int((vTx[n,1]-self.y[0])/self.dx),
+                                              int((vTx[n,2]-self.z[0])/self.dx))]
+                    v0[iRx] = v
+                    ind = np.where(iRx)[0]
+                    for nn in range(len(ind)):
+                        rays[ind[nn]] = t[1][nn]
+                return tt, rays, v0
+            elif nout == 4:
+                for i in range(nTx):
+                    t, iRx, n = tt_queue.get()
+                    tt[iRx] = t[0]
+                    v = 1.0 / self.slowness[self.indc(int((vTx[n,0]-self.x[0])/self.dx),
+                                              int((vTx[n,1]-self.y[0])/self.dx),
+                                              int((vTx[n,2]-self.z[0])/self.dx))]
+                    v0[iRx] = v
+                    ind = np.where(iRx)[0]
+                    for nn in range(len(ind)):
+                        rays[ind[nn]] = t[1][nn]
+                    L[n] = t[2]
+                return tt, rays, v0, L
+
+    def computeD(self, coord):
+        """
+        Return matrix of interpolation weights for velocity data points constraint
+        """
+        if self.is_outside(coord):
+            raise ValueError('Velocity data point outside grid')
+
+        # D is npts x nnodes
+        # for each point in coord, we have 1 values in D
+        ivec = np.arange(coord.shape[0], dtype=np.int64)
+        jvec = np.zeros(ivec.shape, dtype=np.int64)
+        vec = np.ones(ivec.shape)
+
+        for n in np.arange(coord.shape[0]):
+            i = int((coord[n,0]-self.x[0])/self.dx )
+            j = int((coord[n,1]-self.y[0])/self.dx )
+            k = int((coord[n,2]-self.z[0])/self.dx )
+
+            jvec[n] = self.indc(i,j,k)
+
+        return sp.csr_matrix((vec, (ivec,jvec)), shape=(coord.shape[0], self.getNumberOfCells()))
+
+    def computeK(self):
+        """
+        Return smoothing matrices (2nd order derivative)
+        """
+        # central operator f"(x) = (f(x+h)-2f(x)+f(x-h))/h^2
+        # forward operator f"(x) = (f(x+2h)-2f(x+h)+f(x))/h^2
+        # backward operator f"(x) = (f(x)-2f(x-h)+f(x-2h))/h^2
+
+        nx = self.x.size-1
+        ny = self.y.size-1
+        nz = self.z.size-1
+        # Kx
+        iK = np.kron(np.arange(nx*ny*nz, dtype=np.int64), np.ones(3,dtype=np.int64))
+        val = np.tile(np.array([1., -2., 1.]), nx*ny*nz) / (self.dx*self.dx)
+        # i=0 -> forward op
+        jK = np.vstack((np.arange(ny*nz,dtype=np.int64),
+                        np.arange(ny*nz, 2*ny*nz,dtype=np.int64),
+                        np.arange(2*ny*nz, 3*ny*nz,dtype=np.int64))).T.flatten()
+
+        for i in np.arange(1,nx-1):
+            jK = np.hstack((jK,
+                            np.vstack((np.arange((i-1)*ny*nz,i*ny*nz, dtype=np.int64),
+                                       np.arange(i*ny*nz, (i+1)*ny*nz,dtype=np.int64),
+                                       np.arange((i+1)*ny*nz, (i+2)*ny*nz,dtype=np.int64))).T.flatten()))
+        # i=nx-1 -> backward op
+        jK = np.hstack((jK,
+                        np.vstack((np.arange((nx-3)*ny*nz, (nx-2)*ny*nz, dtype=np.int64),
+                                   np.arange((nx-2)*ny*nz, (nx-1)*ny*nz,dtype=np.int64),
+                                   np.arange((nx-1)*ny*nz, nx*ny*nz,dtype=np.int64))).T.flatten()))
+
+        Kx = sp.csr_matrix((val,(iK,jK)))
+
+        # j=0 -> forward op
+        jK = np.vstack((np.arange(nz,dtype=np.int64),
+                        np.arange(nz,2*nz,dtype=np.int64),
+                        np.arange(2*nz,3*nz,dtype=np.int64))).T.flatten()
+        for j in np.arange(1,ny-1):
+            jK = np.hstack((jK,
+                            np.vstack((np.arange((j-1)*nz,j*nz,dtype=np.int64),
+                                       np.arange(j*nz,(j+1)*nz,dtype=np.int64),
+                                       np.arange((j+1)*nz,(j+2)*nz,dtype=np.int64))).T.flatten()))
+        # j=ny-1 -> backward op
+        jK = np.hstack((jK,
+                        np.vstack((np.arange((ny-3)*nz,(ny-2)*nz,dtype=np.int64),
+                                   np.arange((ny-2)*nz,(ny-1)*nz,dtype=np.int64),
+                                   np.arange((ny-1)*nz,ny*nz,dtype=np.int64))).T.flatten()))
+        tmp = jK.copy()
+        for i in np.arange(1,nx):
+            jK = np.hstack((jK, i*ny*nz+tmp))
+
+        Ky = sp.csr_matrix((val,(iK,jK)))
+
+        # k=0
+        jK = np.arange(3,dtype=np.int64)
+        for k in np.arange(1,nz-1):
+            jK = np.hstack((jK,(k-1)+np.arange(3,dtype=np.int64)))
+        # k=nz-1
+        jK = np.hstack((jK, (nz-3)+np.arange(3,dtype=np.int64)))
+
+        tmp = jK.copy()
+        for j in np.arange(1,ny):
+            jK = np.hstack((jK, j*nz+tmp))
+
+        tmp = jK.copy()
+        for i in np.arange(1,nx):
+            jK = np.hstack((jK, i*ny*nz+tmp))
+
+        Kz = sp.csr_matrix((val,(iK,jK)))
+
+        return Kx, Ky, Kz
+
+    def toXdmf(self, field, fieldname, filename):
+        """
+        Save a field in xdmf format (http://www.xdmf.org/index.php/Main_Page)
+
+        INPUT
+            field: data array of size equal to the number of cells in the grid
+            fieldname: name to be assinged to the data (string)
+            filename: name of xdmf file (string)
+        """
+        ox = self.x[0]
+        oy = self.y[0]
+        oz = self.z[0]
+        dx = self.x[1] - self.x[0]
+        dy = self.y[1] - self.y[0]
+        dz = self.z[1] - self.z[0]
+        nx = self.x.size - 1
+        ny = self.y.size - 1
+        nz = self.z.size - 1
+
+        f = open(filename+'.xmf','w')
+
+        f.write('<?xml version="1.0" ?>\n')
+        f.write('<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>\n')
+        f.write('<Xdmf xmlns:xi="http://www.w3.org/2003/XInclude" Version="2.2">\n')
+        f.write(' <Domain>\n')
+        f.write('   <Grid Name="Structured Grid" GridType="Uniform">\n')
+        f.write('     <Topology TopologyType="3DCORECTMesh" NumberOfElements="'+repr(nz)+' '+repr(ny)+' '+repr(nx)+'"/>\n')
+        f.write('     <Geometry GeometryType="ORIGIN_DXDYDZ">\n')
+        f.write('       <DataItem Dimensions="3 " NumberType="Float" Precision="4" Format="XML">\n')
+        f.write('          '+repr(oz)+' '+repr(oy)+' '+repr(ox)+'\n')
+        f.write('       </DataItem>\n')
+        f.write('       <DataItem Dimensions="3 " NumberType="Float" Precision="4" Format="XML">\n')
+        f.write('        '+repr(dz)+' '+repr(dy)+' '+repr(dx)+'\n')
+        f.write('       </DataItem>\n')
+        f.write('     </Geometry>\n')
+        f.write('     <Attribute Name="'+fieldname+'" AttributeType="Scalar" Center="Cell">\n')
+        f.write('       <DataItem Dimensions="'+repr(nz)+' '+repr(ny)+' '+repr(nx)+'" NumberType="Float" Precision="4" Format="HDF">'+filename+'.h5:/'+fieldname+'</DataItem>\n')
+        f.write('     </Attribute>\n')
+        f.write('   </Grid>\n')
+        f.write(' </Domain>\n')
+        f.write('</Xdmf>\n')
+
+        f.close()
+
+        h5f = h5py.File(filename+'.h5', 'w')
+        h5f.create_dataset(fieldname, data=field.reshape((nz,ny,nx), order='F').astype(np.float32))
+        h5f.close()
+
+    def to_vtk(self, field, fieldname, filename):
+        
+        xCoords = numpy_support.numpy_to_vtk(self.x)
+        yCoords = numpy_support.numpy_to_vtk(self.y)
+        zCoords = numpy_support.numpy_to_vtk(self.z)
+        
+        rgrid = vtk.vtkRectilinearGrid()
+        rgrid.SetDimensions(self.x.size, self.y.size, self.z.size)
+        rgrid.SetXCoordinates(xCoords)
+        rgrid.SetYCoordinates(yCoords)
+        rgrid.SetZCoordinates(zCoords)
+        
+        scalar = vtk.vtkDoubleArray()
+        scalar.SetName(fieldname)
+        scalar.SetNumberOfComponents(1)
+        scalar.SetNumberOfTuples(self.getNumberOfCells())
+        tmp = np.reshape(field, (self.z.size-1, self.y.size-1, self.x.size-1), order='F').flatten()
+        for n in range(field.size):
+            scalar.SetTuple1(n, tmp[n])
+        rgrid.GetCellData().SetScalars(scalar)
+        
+        writer = vtk.vtkXMLRectilinearGridWriter()
+        writer.SetFileName(filename+'.vtr')
+        writer.SetInputData(rgrid)
+        writer.SetDataModeToBinary()
+        writer.Update()
+
+
+
+            
+            
+    
 class InvParams():
     def __init__(self, maxit, maxit_hypo, conv_hypo, Vlim, dmax, lagrangians,
                  invert_vel=True, invert_VsVp=True, hypo_2step=False,
@@ -1116,9 +1524,443 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=
         r1a = np.matrix( r1a.reshape(-1,1) )
 
     if par.verbose:
-        print('\n ** Inversion complete **\n')
+        print('\n ** Inversion complete **\n', flush=True)
 
     return hyp0, V.getA1(), sc, (resV, resAxb)
+
+
+def jointHypoVel_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=np.array([])):
+    """
+    Joint hypocenter-velocity inversion on a regular grid
+
+    Parameters
+    ----------
+    par     : instance of InvParams
+    grid    : instance of Grid3D
+    data    : a numpy array with 5 columns
+               1st column is event ID number
+               2nd column is arrival time
+               3rd column is receiver index
+               *** important ***
+               data should sorted by event ID first, then by receiver index
+    rcv:    : coordinates of receivers
+               1st column is receiver easting
+               2nd column is receiver northing
+               3rd column is receiver elevation
+    Vinit   : initial velocity model
+    hinit   : initial hypocenter coordinate
+               1st column is event ID number
+               2nd column is origin time
+               3rd column is receiver easting
+               4th column is receiver northing
+               5th column is receiver elevation
+               *** important ***
+               for efficiency reason when computing matrix M, initial hypocenters
+               should _not_ be equal for any two event, e.g. they shoud all be
+               different
+    caldata : calibration shot data, numpy array with 8 columns
+               1st column is cal shot ID number
+               2nd column is arrival time
+               3rd column is receiver index
+               4th column is source easting
+               5th column is source northing
+               6th column is source elevation
+               *** important ***
+               cal shot data should sorted by cal shot ID first, then by receiver index
+    Vpts    : known velocity points, numpy array with 4 columns
+               1st column is velocity
+               2nd column is easting
+               3rd column is northing
+               4th column is elevation
+
+    Returns
+    -------
+    loc : hypocenter coordinates
+    V   : velocity model
+    sc  : static corrections
+    res : residuals
+    """
+
+    evID = np.unique(data[:,0])
+    nev = evID.size
+    if par.use_sc:
+        nsta = rcv.shape[0]
+    else:
+        nsta = 0
+
+    sc = np.zeros(nsta)
+    hyp0 = hinit.copy()
+    ncells = grid.getNumberOfCells()
+
+    rcv_data = np.empty((data.shape[0],3))
+    for ne in np.arange(nev):
+        indr = np.nonzero(data[:,0] == evID[ne])[0]
+        for i in indr:
+            rcv_data[i,:] = rcv[int(1.e-6+data[i,2])]
+
+    if data.shape[0] > 0:
+        tobs = data[:,1]
+    else:
+        tobs = np.array([])
+
+    if caldata.shape[0] > 0:
+        calID = np.unique(caldata[:,0])
+        ncal = calID.size
+        hcal = np.column_stack((caldata[:,0], np.zeros(caldata.shape[0]), caldata[:,3:]))
+        tcal = caldata[:,1]
+        rcv_cal = np.empty((caldata.shape[0],3))
+        Lsc_cal = []
+        for nc in range(ncal):
+            indr = np.nonzero(caldata[:,0] == calID[nc])[0]
+            nst = np.sum(indr.size)
+            for i in indr:
+                rcv_cal[i,:] = rcv[int(1.e-6+caldata[i,2])]
+            if par.use_sc:
+                tmp = np.zeros((nst,nsta))
+                for n in range(nst):
+                    tmp[n,int(1.e-6+caldata[indr[n],2])] = 1.0
+                Lsc_cal.append(sp.csr_matrix(tmp))
+    else:
+        ncal = 0
+        tcal = np.array([])
+
+    if np.isscalar(Vinit):
+        V = Vinit + np.zeros(ncells)
+        s = np.matrix(np.ones(ncells)/Vinit)
+    else:
+        V = Vinit
+        s = np.matrix(1./Vinit)
+    s = s.reshape(-1,1)
+
+    if Vpts.size > 0:
+        if Vpts.shape[1] > 4:           # check if we have Vs data in array
+            itmp = Vpts[:, 4] == 0
+            Vpts = Vpts[itmp, :4]       # keep only Vp data
+
+    if par.verbose:
+        print('\n *** Joint hypocenter-velocity inversion ***\n')
+
+    if par.invert_vel:
+        resV = np.zeros(par.maxit+1)
+        resAxb = np.zeros(par.maxit)
+
+        P = sp.csr_matrix(np.ones(ncells).reshape(-1,1))
+        dP = sp.csr_matrix((np.ones(ncells), (np.arange(ncells,dtype=np.int64),
+                                     np.arange(ncells,dtype=np.int64))), shape=(ncells,ncells))
+        
+        Spmax = 1. / par.Vpmin
+        Spmin = 1. / par.Vpmax
+
+        deltam = np.ones(ncells+nsta).reshape(-1,1)
+        deltam[:,0] = 0.0
+        deltam = sp.csr_matrix(deltam)
+        if par.constr_sc:
+            u1 = np.ones(ncells+nsta).reshape(-1,1)
+            u1[:ncells,0] = 0.0
+            u1 = sp.csr_matrix(u1)
+        else:
+            u1 = sp.csr_matrix(np.zeros(ncells+nsta).reshape(-1,1))
+
+        if Vpts.size > 0:
+            if par.verbose:
+                print('Building velocity data point matrix D')
+                sys.stdout.flush()
+            D = grid.computeD(Vpts[:,1:])
+            D1 = sp.hstack((D, sp.coo_matrix((Vpts.shape[0],nsta)))).tocsr()
+            Spts = 1. / Vpts[:,0].reshape(-1,1)
+        else:
+            D = 0.0
+
+        if par.verbose:
+            print('Building regularization matrix K')
+            sys.stdout.flush()
+        Kx, Ky, Kz = grid.computeK()
+        Kx1 = sp.hstack((Kx, sp.coo_matrix((ncells,nsta)))).tocsr()
+        KtK = Kx1.T * Kx1
+        Ky1 = sp.hstack((Ky, sp.coo_matrix((ncells,nsta)))).tocsr()
+        KtK += Ky1.T * Ky1
+        Kz1 = sp.hstack((Kz, sp.coo_matrix((ncells,nsta)))).tocsr()
+        KtK += par.wzK * Kz1.T * Kz1
+        nK = spl.norm(KtK)
+        Kx = Kx.tocsr()
+        Ky = Ky.tocsr()
+        Kz = Kz.tocsr()
+    else:
+        resV = None
+        resAxb = None
+
+    if par.verbose:
+        print('\nStarting iterations')
+
+    for it in np.arange(par.maxit):
+
+        par._final_iteration = it == par.maxit-1
+
+        if par.invert_vel:
+            if par.verbose:
+                print('\nIteration {0:d} - Updating velocity model'.format(it+1))
+                print('                Updating penalty vector')
+                sys.stdout.flush()
+
+            # compute vector C
+            cx = Kx * s
+            cy = Ky * s
+            cz = Kz * s
+
+            # compute dP/dV, matrix of penalties derivatives
+            for n in np.arange(ncells):
+                if s[n,0] < Spmin:
+                    P[n,0] = par.PAp * (Spmin-s[n,0])
+                    dP[n,n] = -par.PAp
+                elif s[n,0] > Spmax:
+                    P[n,0] = par.PAp * (s[n,0]-Spmax)
+                    dP[n,n] = par.PAp
+                else:
+                    P[n,0] = 0.0
+                    dP[n,n] = 0.0
+            if par.verbose:
+                npel = np.sum( P != 0.0 )
+                if npel > 0:
+                    print('                  Penalties applied at {0:d} nodes'.format(npel))
+
+            if par.verbose:
+                print('                Raytracing')
+                sys.stdout.flush()
+
+            if nev > 0:
+                hyp = np.empty((data.shape[0],5))
+                for ne in np.arange(nev):
+                    indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+                    indr = np.nonzero(data[:,0] == evID[ne])[0]
+                    for i in indr:
+                        hyp[i,:] = hyp0[indh[0],:]
+                tcalc, rays, v0, Lev = grid.raytrace(s.getA1(), hyp, rcv_data)
+            else:
+                tcalc = np.array([])
+
+            if ncal > 0:
+                tcalc_cal, _, _, Lcal = grid.raytrace(s.getA1(), hcal, rcv_cal)
+            else:
+                tcalc_cal = np.array([])
+
+            r1a = tobs - tcalc
+            r1 = tcal - tcalc_cal
+            if r1a.size > 0:
+                r1 = np.hstack((np.zeros(data.shape[0]-4*nev), r1))
+
+            if par.show_plots:
+                plt.figure(1)
+                plt.cla()
+                plt.plot(r1a,'o')
+                plt.title('Residuals - Iteration {0:d}'.format(it+1))
+                plt.show(block=False)
+                plt.pause(0.0001)
+
+            resV[it] = np.linalg.norm(np.hstack((r1a, r1)))
+            r1 = np.matrix( r1.reshape(-1,1) )
+            r1a = np.matrix( r1a.reshape(-1,1) )
+
+            # initializing matrix M; matrix of partial derivatives of velocity dt/dV
+            if par.verbose:
+                print('                Building matrix L')
+                sys.stdout.flush()
+
+            L1 = None
+            ir1 = 0
+            for ne in range(nev):
+                if par.verbose:
+                    print('                  Event ID '+str(int(1.e-6+evID[ne])))
+                    sys.stdout.flush()
+
+                indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+                indr = np.nonzero(data[:,0] == evID[ne])[0]
+
+                nst = np.sum(indr.size)
+                nst2 = nst-4
+                H = np.ones((nst,4))
+                for ns in range(nst):
+                    raysi = rays[indr[ns]]
+                    V0 = v0[indr[ns]]
+
+                    d = (raysi[1,:]-hyp0[indh,2:]).flatten()
+                    ds = np.sqrt( np.sum(d*d) )
+                    H[ns,1] = -1./V0 * d[0]/ds
+                    H[ns,2] = -1./V0 * d[1]/ds
+                    H[ns,3] = -1./V0 * d[2]/ds
+
+                Q, _ = np.linalg.qr(H, mode='complete')
+                T = sp.csr_matrix(Q[:, 4:]).T
+                L = sp.csr_matrix(Lev[ne], shape=(nst,ncells))
+                if par.use_sc:
+                    Lsc = np.zeros((nst,nsta))
+                    for ns in range(nst):
+                        Lsc[ns,int(1.e-6+data[indr[ns],2])] = 1.
+                    L = sp.hstack((L, sp.csr_matrix(Lsc)))
+
+                L = T * L
+
+                if L1 == None:
+                    L1 = L
+                else:
+                    L1 = sp.vstack((L1, L))
+
+                r1[ir1 + np.arange(nst2, dtype=np.int64)] = T.dot(r1a[indr])
+                ir1 += nst2
+
+            for nc in range(ncal):
+                L = Lcal[nc]
+                if par.use_sc:
+                    L = sp.hstack((L, Lsc_cal[nc]))
+                if L1 == None:
+                    L1 = L
+                else:
+                    L1 = sp.vstack((L1, L))
+
+            if par.verbose:
+                print('                Assembling matrices and solving system')
+                sys.stdout.flush()
+
+            ssc = -np.sum(sc) # u1.T * deltam
+
+            dP1 = sp.hstack((dP, sp.csr_matrix(np.zeros((ncells,nsta))))).tocsr()  # dP prime
+
+            # compute A & h for inversion
+
+            L1 = L1.tocsr()
+
+            A = L1.T * L1
+            nM = spl.norm(A)
+
+            λ = par.λ * nM / nK
+
+            A += λ*KtK
+
+            tmp = dP1.T * dP1
+            nP = spl.norm(tmp)
+            if nP != 0.0:
+                γ = par.γ * nM / nP
+            else:
+                γ = par.γ
+
+            A += γ*tmp
+            A += u1 * u1.T
+
+            b = L1.T * r1
+            tmp2x = Kx1.T * cx
+            tmp2y = Ky1.T * cy
+            tmp2z = Kz1.T * cz
+            tmp3 = dP1.T * P
+            tmp = u1 * ssc
+            b += - λ*tmp2x - λ*tmp2y - par.wzK*λ*tmp2z - γ*tmp3 - tmp
+
+            if Vpts.shape[0] > 0:
+                tmp = D1.T * D1
+                nD = spl.norm(tmp)
+                α = par.α * nM / nD
+                A += α * tmp
+                b += α * D1.T * (Spts - D*s )
+
+            if par.verbose:
+                print('                  calling minres with system of size {0:d} x {1:d}'.format(A.shape[0], A.shape[1]))
+                sys.stdout.flush()
+            x = spl.minres(A, b.getA1())
+
+            deltam = np.matrix(x[0].reshape(-1,1))
+            resAxb[it] = np.linalg.norm(A*deltam - b)
+
+            dmean = np.mean( np.abs(deltam[:ncells]) )
+            if dmean > par.dVp_max:
+                if par.verbose:
+                    print('                Scaling Slowness perturbations by {0:e}'.format(1./(par.dVp_max*dmean)))
+                deltam[:ncells] = deltam[:ncells] / (par.dVp_max*dmean)
+
+            s += np.matrix(deltam[:ncells].reshape(-1,1))
+            V = 1. / s.getA1()
+            sc += deltam[ncells:,0].getA1()
+
+            if par.save_V:
+                if par.verbose:
+                    print('                Saving Velocity model')
+                if 'vtk' in sys.modules:
+                    grid.to_vtk(V, 'Vp', 'Vp{0:02d}'.format(it+1))
+                else:
+                    grid.toXdmf(V, 'Vp', 'Vp{0:02d}'.format(it+1))
+
+            grid.set_slowness(s.getA1())
+
+        if nev > 0:
+            if par.verbose:
+                print('Iteration {0:d} - Relocating events'.format(it+1))
+                sys.stdout.flush()
+
+            if grid.nthreads == 1 or nev < grid.nthreads:
+                for ne in range(nev):
+                    _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs)
+            else:
+                # run in parallel
+                blk_size = np.zeros((grid.nthreads,), dtype=np.int64)
+                nj = nev
+                while nj > 0:
+                    for n in range(grid.nthreads):
+                        blk_size[n] += 1
+                        nj -= 1
+                        if nj == 0:
+                            break
+                processes = []
+                blk_start = 0
+                h_queue = Queue()
+                for n in range(grid.nthreads):
+                    blk_end = blk_start + blk_size[n]
+                    p = Process(target=_rl_worker,
+                                args=(n, blk_start, blk_end, par, grid, evID, hyp0, data, rcv, tobs, h_queue),
+                                daemon=True)
+                    processes.append(p)
+                    p.start()
+                    blk_start += blk_size[n]
+
+                for ne in range(nev):
+                    h, indh = h_queue.get()
+                    hyp0[indh, :] = h
+
+    if par.invert_vel:
+        if nev > 0:
+            hyp = np.empty((data.shape[0],5))
+            for ne in np.arange(nev):
+                indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+                indr = np.nonzero(data[:,0] == evID[ne])[0]
+                for i in indr:
+                    hyp[i,:] = hyp0[indh[0],:]
+            tcalc = grid.raytrace(s.getA1(), hyp, rcv_data)
+        else:
+            tcalc = np.array([])
+
+        if ncal > 0:
+            tcalc_cal = grid.raytrace(s, hcal, rcv_cal)
+        else:
+            tcalc_cal = np.array([])
+
+        r1a = tobs - tcalc
+        r1 = tcal - tcalc_cal
+        if r1a.size > 0:
+            r1 = np.hstack((np.zeros(data.shape[0]-4*nev), r1))
+
+        if par.show_plots:
+            plt.figure(1)
+            plt.cla()
+            plt.plot(r1a,'o')
+            plt.title('Residuals - Final step')
+            plt.show(block=False)
+            plt.pause(0.0001)
+
+        resV[-1] = np.linalg.norm(np.hstack((r1a, r1)))
+
+        r1 = np.matrix( r1.reshape(-1,1) )
+        r1a = np.matrix( r1a.reshape(-1,1) )
+
+    if par.verbose:
+        print('\n ** Inversion complete **\n', flush=True)
+
+    return hyp0, V, sc, (resV, resAxb)
 
 
 def _rl_worker(thread_no, istart, iend, par, grid, evID, hyp0, data, rcv, tobs, h_queue):
@@ -1916,7 +2758,662 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         resV[-1] = np.linalg.norm(np.hstack((tobs-tcalc, tcal-tcalc_cal)))
 
     if par.verbose:
-        print('\n ** Inversion complete **\n')
+        print('\n ** Inversion complete **\n', flush=True)
+
+    return hyp0, (Vp.getA1(), Vs.getA1()), (sc_p, sc_s), (resV, resAxb)
+
+
+def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpts=np.array([])):
+    """
+    Joint hypocenter-velocity inversion on a regular grid
+
+    Parameters
+    ----------
+    par     : instance of InvParams
+    grid    : instances of Grid3D
+    data    : a numpy array with 5 columns
+               1st column is event ID number
+               2nd column is arrival time
+               3rd column is receiver index
+               4th column is code for wave phase: 0 for P-wave and 1 for S-wave
+               *** important ***
+               data should sorted by event ID first, then by receiver index
+    rcv:    : coordinates of receivers
+               1st column is receiver easting
+               2nd column is receiver northing
+               3rd column is receiver elevation
+    Vinit   : tuple with initial velocity model (P-wave first, S-wave second)
+    hinit   : initial hypocenter coordinate
+               1st column is event ID number
+               2nd column is origin time
+               3rd column is receiver easting
+               4th column is receiver northing
+               5th column is receiver elevation
+               *** important ***
+               for efficiency reason when computing matrix M, initial hypocenters
+               should _not_ be equal for any two event, e.g. they shoud all be
+               different
+    caldata : calibration shot data, numpy array with 8 columns
+               1st column is cal shot ID number
+               2nd column is arrival time
+               3rd column is receiver index
+               4th column is source easting
+               5th column is source northing
+               6th column is source elevation
+               7th column is code for wave phase: 0 for P-wave and 1 for S-wave
+               *** important ***
+               cal shot data should sorted by cal shot ID first, then by receiver index
+    Vpts    : known velocity points, numpy array with 4 columns
+               1st column is velocity
+               2nd column is easting
+               3rd column is northing
+               4th column is elevation
+               5th column is code for wave phase: 0 for P-wave and 1 for S-wave
+
+    Returns
+    -------
+    loc : hypocenter coordinates
+    V   : velocity models (tuple holding Vp and Vs)
+    sc  : static corrections
+    res : residuals
+    """
+
+    if grid.nthreads > 1:
+        # we need a second instance for parallel computations
+        grid_s = Grid3Dc(grid.x, grid.y, grid.z, grid.nthreads)
+    else:
+        grid_s = grid
+
+    evID = np.unique(data[:,0])
+    nev = evID.size
+    if par.use_sc:
+        nsta = rcv.shape[0]
+    else:
+        nsta = 0
+
+    sc_p = np.zeros(nsta)
+    sc_s = np.zeros(nsta)
+    hyp0 = hinit.copy()
+    ncells = grid.getNumberOfCells()
+
+    # sort data by seismic phase (P-wave first S-wave second)
+    indp = data[:,3] == 0.0
+    inds = data[:,3] == 1.0
+    nttp = np.sum( indp )
+    ntts = np.sum( inds )
+    datap = data[indp,:]
+    datas = data[inds,:]
+    data = np.vstack((datap, datas))
+
+    rcv_datap = np.empty((nttp,3))
+    rcv_datas = np.empty((ntts,3))
+    for ne in np.arange(nev):
+        indr = np.nonzero(np.logical_and(data[:,0] == evID[ne], indp))[0]
+        for i in indr:
+            rcv_datap[i,:] = rcv[int(1.e-6+data[i,2])]
+        indr = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
+        for i in indr:
+            rcv_datas[i-nttp,:] = rcv[int(1.e-6+data[i,2])]
+
+
+    if data.shape[0] > 0:
+        tobs = data[:,1]
+    else:
+        tobs = np.array([])
+
+    if caldata.shape[0] > 0:
+        calID = np.unique(caldata[:,0])
+        ncal = calID.size
+
+        # sort data by seismic phase (P-wave first S-wave second)
+        indcalp = caldata[:,6] == 0.0
+        indcals = caldata[:,6] == 1.0
+        nttcalp = np.sum( indcalp )
+        nttcals = np.sum( indcals )
+        caldatap = caldata[indcalp,:]
+        caldatas = caldata[indcals,:]
+        caldata = np.vstack((caldatap, caldatas))
+
+        hcalp = np.column_stack((caldata[indcalp,0], np.zeros(nttcalp), caldata[indcalp,3:6]))
+        hcals = np.column_stack((caldata[indcals,0], np.zeros(nttcals), caldata[indcals,3:6]))
+
+        rcv_calp = np.empty((nttcalp,3))
+        rcv_cals = np.empty((nttcals,3))
+
+        tcal = caldata[:,1]
+        Lsc_cal = []
+        for nc in range(ncal):
+            indrp = np.nonzero(np.logical_and(caldata[:,0] == calID[nc], indcalp))[0]
+            for i in indrp:
+                rcv_calp[i,:] = rcv[int(1.e-6+caldata[i,2])]
+            indrs = np.nonzero(np.logical_and(caldata[:,0] == calID[nc], indcals))[0]
+            for i in indrs:
+                rcv_cals[i-nttcalp,:] = rcv[int(1.e-6+caldata[i,2])]
+
+            if par.use_sc:
+                Lpsc = np.zeros((indrp.size,nsta))
+                Lssc = np.zeros((indrs.size,nsta))
+                for ns in range(indrp.size):
+                    Lpsc[ns,int(1.e-6+caldata[indrp[ns],2])] = 1.
+                for ns in range(indrs.size):
+                    Lssc[ns,int(1.e-6+caldata[indrs[ns],2])] = 1.
+
+                Lsc_cal.append( sp.block_diag((sp.csr_matrix(Lpsc), sp.csr_matrix(Lssc))) )
+
+    else:
+        ncal = 0
+        tcal = np.array([])
+
+    if np.isscalar(Vinit[0]):
+        Vp = np.zeros(ncells) + Vinit[0]
+        s_p = np.matrix(1./Vinit[0] + np.zeros(ncells))
+    else:
+        Vp = Vinit[0]
+        s_p = np.matrix(1./Vinit[0])
+    s_p = s_p.reshape(-1,1)
+    if np.isscalar(Vinit[1]):
+        Vs = np.zeros(ncells) + Vinit[1]
+        s_s = np.matrix(1./Vinit[1] + np.zeros(ncells))
+    else:
+        Vs = Vinit[1]
+        s_s = np.matrix(1./Vinit[1])
+    s_s = s_s.reshape(-1,1)
+    if par.invert_VsVp:
+        SsSp = s_s/s_p
+        s = np.vstack((s_p, SsSp))
+    else:
+        s = np.vstack((s_p, s_s))
+
+    if par.verbose:
+        print('\n *** Joint hypocenter-velocity inversion  -- P and S-wave data ***\n')
+
+    if par.invert_vel:
+        resV = np.zeros(par.maxit+1)
+        resAxb = np.zeros(par.maxit)
+
+        P = sp.csr_matrix(np.ones(2*ncells).reshape(-1,1))
+        dP = sp.csr_matrix((np.ones(2*ncells), (np.arange(2*ncells,dtype=np.int64),
+                            np.arange(2*ncells,dtype=np.int64))),
+                            shape=(2*ncells,2*ncells))
+        
+        Spmin = 1./par.Vpmax
+        Spmax = 1./par.Vpmin
+        Ssmin = 1./par.Vsmax
+        Ssmax = 1./par.Vsmin
+
+        deltam = np.ones(2*ncells+2*nsta).reshape(-1,1)
+        deltam[:,0] = 0.0
+        deltam = sp.csr_matrix(deltam)
+
+        if par.constr_sc:
+            u1 = np.ones(2*ncells+2*nsta).reshape(-1,1)
+            u1[:2*ncells,0] = 0.0
+            u1[(2*ncells+nsta):,0] = 0.0
+            u1 = sp.csr_matrix(u1)
+        else:
+            u1 = sp.csr_matrix(np.zeros(2*ncells+2*nsta).reshape(-1,1))
+
+        if Vpts.size > 0:
+
+            if par.verbose:
+                print('Building velocity data point matrix D')
+                sys.stdout.flush()
+
+            if par.invert_VsVp:
+                Vpts2 = Vpts.copy()
+                i_p = np.nonzero(Vpts[:,4]==0.0)[0]
+                i_s = np.nonzero(Vpts[:,4]==1.0)[0]
+                for i in i_s:
+                    for ii in i_p:
+                        d = np.sqrt( np.sum( (Vpts2[i,1:4]-Vpts[ii,1:4])**2 ) )
+                        if d < 0.00001:
+                            Vpts2[i,0] = Vpts[i,0]/Vpts[ii,0]
+                            break
+                    else:
+                        raise ValueError('Missing Vp data point for Vs data at ({0:f}, {1:f}, {2:f})'.format(Vpts[i,1], Vpts[i,2], Vpts[i,3]))
+
+            else:
+                Vpts2 = Vpts
+
+            if par.invert_VsVp:
+                D = grid.computeD(Vpts2[:,1:4])
+                D = sp.hstack((D, sp.coo_matrix(D.shape))).tocsr()
+            else:
+                i_p = Vpts2[:,4]==0.0
+                i_s = Vpts2[:,4]==1.0
+                Dp = grid.computeD(Vpts2[i_p,1:4])
+                Ds = grid.computeD(Vpts2[i_s,1:4])
+                D = sp.block_diag((Dp, Ds)).tocsr()
+
+            D1 = sp.hstack((D, sp.csr_matrix((Vpts2.shape[0],2*nsta)))).tocsr()
+            Spts = 1. / Vpts2[:,0].reshape(-1,1)
+        else:
+            D = 0.0
+
+        if par.verbose:
+            print('Building regularization matrix K')
+            sys.stdout.flush()
+        Kx, Ky, Kz = grid.computeK()
+        Kx = sp.block_diag((Kx, Kx))
+        Ky = sp.block_diag((Ky, Ky))
+        Kz = sp.block_diag((Kz, Kz))
+        Kx1 = sp.hstack((Kx, sp.coo_matrix((2*ncells,2*nsta)))).tocsr()
+        KtK = Kx1.T * Kx1
+        Ky1 = sp.hstack((Ky, sp.coo_matrix((2*ncells,2*nsta)))).tocsr()
+        KtK += Ky1.T * Ky1
+        Kz1 = sp.hstack((Kz, sp.coo_matrix((2*ncells,2*nsta)))).tocsr()
+        KtK += par.wzK * Kz1.T * Kz1
+        nK = spl.norm(KtK)
+        Kx = Kx.tocsr()
+        Ky = Ky.tocsr()
+        Kz = Kz.tocsr()
+    else:
+        resV = None
+        resAxb = None
+
+    if par.invert_VsVp:
+        SsSpmin = par.Vsmin/par.Vpmax
+        SsSpmax = par.Vsmax/par.Vpmin
+
+    if par.verbose:
+        print('\nStarting iterations')
+
+    for it in np.arange(par.maxit):
+
+        par._final_iteration = it == par.maxit-1
+
+        if par.invert_vel:
+            if par.verbose:
+                print('\nIteration {0:d} - Updating velocity model'.format(it+1))
+                print('                Updating penalty vector')
+                sys.stdout.flush()
+
+            # compute vector C
+            cx = Kx * s
+            cy = Ky * s
+            cz = Kz * s
+
+            # compute dP/dV, matrix of penalties derivatives
+            for n in np.arange(ncells):
+                if s[n,0] < Spmin:
+                    P[n,0] = par.PAp * (Spmin-s[n,0])
+                    dP[n,n] = -par.PAp
+                elif s[n,0] > Spmax:
+                    P[n,0] = par.PAp * (s[n,0]-Spmax)
+                    dP[n,n] = par.PAp
+                else:
+                    P[n,0] = 0.0
+                    dP[n,n] = 0.0
+            for n in np.arange(ncells, 2*ncells):
+                if par.invert_VsVp:
+                    if SsSp[n-ncells,0] < SsSpmin:
+                        P[n,0] = par.PAs * (SsSpmin-SsSp[n-ncells,0])
+                        dP[n,n] = -par.PAs
+                    elif SsSp[n-ncells,0] > SsSpmax:
+                        P[n,0] = par.PAs * (SsSp[n-ncells,0]-SsSpmax)
+                        dP[n,n] = par.PAs
+                    else:
+                        P[n,0] = 0.0
+                        dP[n,n] = 0.0
+                else:
+                    if s_s[n-ncells,0] < Ssmin:
+                        P[n,0] = par.PAs * (Ssmin-Vs[n-ncells,0])
+                        dP[n,n] = -par.PAs
+                    elif s_s[n-ncells,0] > Ssmax:
+                        P[n,0] = par.PAs * (s_s[n-ncells,0]-Ssmax)
+                        dP[n,n] = par.PAs
+                    else:
+                        P[n,0] = 0.0
+                        dP[n,n] = 0.0
+
+            if par.verbose:
+                npel = np.sum( P[:ncells,0] != 0.0 )
+                if npel > 0:
+                    print('                  P-wave penalties applied at {0:d} nodes'.format(npel))
+                npel = np.sum( P[ncells:2*ncells,0] != 0.0 )
+                if npel > 0:
+                    print('                  S-wave penalties applied at {0:d} nodes'.format(npel))
+
+
+            if par.verbose:
+                print('                Raytracing')
+                sys.stdout.flush()
+
+            if nev > 0:
+                hyp = np.empty((nttp,5))
+                for ne in np.arange(nev):
+                    indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+                    indrp = np.nonzero(np.logical_and(data[:,0] == evID[ne], indp))[0]
+                    for i in indrp:
+                        hyp[i,:] = hyp0[indh[0],:]
+
+                tcalcp, raysp, v0p, Levp = grid.raytrace(s_p.getA1(), hyp, rcv_datap)
+
+                hyp = np.empty((ntts,5))
+                for ne in np.arange(nev):
+                    indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+                    indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
+                    for i in indrs:
+                        hyp[i-nttp,:] = hyp0[indh[0],:]
+                tcalcs, rayss, v0s, Levs = grid_s.raytrace(s_s.getA1(), hyp, rcv_datas)
+
+                tcalc = np.hstack((tcalcp, tcalcs))
+                v0 = np.hstack((v0p, v0s))
+                rays = []
+                for r in raysp:
+                    rays.append( r )
+                for r in rayss:
+                    rays.append( r )
+
+                # Merge Mevp & Mevs
+                Lev = [None] * nev
+                for ne in np.arange(nev):
+
+                    Lp = Levp[ne]
+                    Ls = Levs[ne]
+
+                    if par.invert_VsVp:
+                        # Block 1991, p. 45
+                        tmp1 = Ls.multiply(matlib.repmat(SsSp.T, Ls.shape[0], 1))
+                        tmp2 = Ls.multiply(matlib.repmat(s_p.T, Ls.shape[0], 1))
+                        tmp2 = sp.hstack((tmp1, tmp2))
+                        tmp1 = sp.hstack((Lp, sp.csr_matrix(Lp.shape)))
+                        Lev[ne] = sp.vstack((tmp1, tmp2))
+                    else:
+                        Lev[ne] = sp.block_diag((Lp, Ls))
+
+                    if par.use_sc:
+                        indrp = np.nonzero(np.logical_and(data[:,0] == evID[ne], indp))[0]
+                        indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
+
+                        Lpsc = np.zeros((indrp.size,nsta))
+                        Lssc = np.zeros((indrs.size,nsta))
+                        for ns in range(indrp.size):
+                            Lpsc[ns,int(1.e-6+data[indrp[ns],2])] = 1.
+                        for ns in range(indrs.size):
+                            Lssc[ns,int(1.e-6+data[indrs[ns],2])] = 1.
+
+                        Lsc = sp.block_diag((sp.csr_matrix(Lpsc), sp.csr_matrix(Lssc)))
+                        # add terms for station corrections after terms for velocity because
+                        # solution vector contains [Vp Vs sc_p sc_s] in that order
+                        Lev[ne] = sp.hstack((Lev[ne], Lsc))
+
+            else:
+                tcalc = np.array([])
+
+            if ncal > 0:
+                tcalcp_cal, _, _, Lp_cal = grid.raytrace(s_p.getA1(), hcalp, rcv_calp)
+                if nttcals > 0:
+                    tcalcs_cal, _, _, Ls_cal = grid_s.raytrace(s_s.getA1(), hcals, rcv_cals)
+                    tcalc_cal = np.hstack((tcalcp_cal, tcalcs_cal))
+                else:
+                    tcalc_cal = tcalcp_cal
+            else:
+                tcalc_cal = np.array([])
+
+            r1a = tobs - tcalc
+            r1 = tcal - tcalc_cal
+            if r1a.size > 0:
+                r1 = np.hstack((np.zeros(data.shape[0]-4*nev), r1))
+
+            r1 = np.matrix( r1.reshape(-1,1) )
+            r1a = np.matrix( r1a.reshape(-1,1) )
+
+            resV[it] = np.linalg.norm(np.hstack((tobs-tcalc, tcal-tcalc_cal)))
+
+            if par.show_plots:
+                plt.figure(1)
+                plt.cla()
+                plt.plot(r1a,'o')
+                plt.title('Residuals - Iteration {0:d}'.format(it+1))
+                plt.show(block=False)
+                plt.pause(0.0001)
+
+            # initializing matrix M; matrix of partial derivatives of velocity dt/dV
+            if par.verbose:
+                print('                Building matrix M')
+                sys.stdout.flush()
+
+            L1 = None
+            ir1 = 0
+            for ne in range(nev):
+                if par.verbose:
+                    print('                  Event ID '+str(int(1.e-6+evID[ne])))
+                    sys.stdout.flush()
+
+                indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+                indr = np.nonzero(data[:,0] == evID[ne])[0]
+
+                nst = np.sum(indr.size)
+                nst2 = nst-4
+                H = np.ones((nst,4))
+                for ns in range(nst):
+                    raysi = rays[indr[ns]]
+                    V0 = v0[indr[ns]]
+
+                    d = (raysi[1,:]-hyp0[indh,2:]).flatten()
+                    ds = np.sqrt( np.sum(d*d) )
+                    H[ns,1] = -1./V0 * d[0]/ds
+                    H[ns,2] = -1./V0 * d[1]/ds
+                    H[ns,3] = -1./V0 * d[2]/ds
+
+                Q, _ = np.linalg.qr(H, mode='complete')
+                T = sp.csr_matrix(Q[:, 4:]).T
+                L = T * Lev[ne]
+
+                if L1 == None:
+                    L1 = L
+                else:
+                    L1 = sp.vstack((L1, L))
+
+                r1[ir1 + np.arange(nst2, dtype=np.int64)] = T.dot(r1a[indr])
+                ir1 += nst2
+
+            for nc in range(ncal):
+                Lp = Lp_cal[nc]
+                if nttcals > 0:
+                    Ls = Ls_cal[nc]
+                else:
+                    Ls = sp.csr_matrix([])
+
+                if par.invert_VsVp:
+                    if nttcals > 0:
+                        # Block 1991, p. 45
+                        tmp1 = Ls.multiply(matlib.repmat(SsSp.T, Ls.shape[0], 1))
+                        tmp2 = Ls.multiply(matlib.repmat(Vp.T, Ls.shape[0], 1))
+                        tmp2 = sp.hstack((tmp1, tmp2))
+                        tmp1 = sp.hstack((Lp, sp.csr_matrix(Lp.shape)))
+                        L = sp.vstack((tmp1, tmp2))
+                    else:
+                        L = sp.hstack((Lp, sp.csr_matrix(Lp.shape)))
+                else:
+                    L = sp.block_diag((Lp, Ls))
+
+                if par.use_sc:
+                    L = sp.hstack((L, Lsc_cal[nc]))
+
+                if L1 == None:
+                    L1 = L
+                else:
+                    L1 = sp.vstack((L1, L))
+
+            if par.verbose:
+                print('                Assembling matrices and solving system')
+                sys.stdout.flush()
+
+            ssc = -np.sum(sc_p)
+
+            dP1 = sp.hstack((dP, sp.csr_matrix((2*ncells,2*nsta)))).tocsr()  # dP prime
+
+            # compute A & h for inversion
+
+            L1 = L1.tocsr()
+
+            A = L1.T * L1
+
+            nM = spl.norm(A)
+            λ = par.λ * nM / nK
+
+            A += λ*KtK
+
+            tmp = dP1.T * dP1
+            nP = spl.norm(tmp)
+            if nP != 0.0:
+                γ = par.γ * nM / nP
+            else:
+                γ = par.γ
+
+            A += γ*tmp
+            A += u1 * u1.T
+
+            b = L1.T * r1
+            tmp2x = Kx1.T * cx
+            tmp2y = Ky1.T * cy
+            tmp2z = Kz1.T * cz
+            tmp3 = dP1.T * P
+            tmp = u1 * ssc
+            b += -λ*tmp2x - λ*tmp2y - par.wzK*λ*tmp2z - γ*tmp3 - tmp
+
+            if Vpts2.shape[0] > 0:
+                tmp = D1.T * D1
+                nD = spl.norm(tmp)
+                α = par.α * nM / nD
+                A += α * tmp
+                b += α * D1.T * (Spts - D*s )
+
+            if par.verbose:
+                print('                  calling minres with system of size {0:d} x {1:d}'.format(A.shape[0], A.shape[1]))
+                sys.stdout.flush()
+            x = spl.minres(A, b.getA1())
+
+            deltam = np.matrix(x[0].reshape(-1,1))
+            resAxb[it] = np.linalg.norm(A*deltam - b)
+
+            dmean = np.mean( np.abs(deltam[:ncells]) )
+            if dmean > par.dVp_max:
+                if par.verbose:
+                    print('                Scaling P slowness perturbations by {0:e}'.format(1./(par.dVp_max*dmean)))
+                deltam[:ncells] = deltam[:ncells] / (par.dVp_max*dmean)
+            dmean = np.mean( np.abs(deltam[ncells:2*ncells]) )
+            if dmean > par.dVs_max:
+                if par.verbose:
+                    print('                Scaling S slowness perturbations by {0:e}'.format(1./(par.dVs_max*dmean)))
+                deltam[ncells:2*ncells] = deltam[ncells:2*ncells] / (par.dVs_max*dmean)
+
+            s += np.matrix(deltam[:2*ncells].reshape(-1,1))
+            s_p = s[:ncells]
+            if par.invert_VsVp:
+                SsSp = s[ncells:2*ncells]
+                s_s = np.multiply( SsSp, s_p )
+            else:
+                s_s = s[ncells:2*ncells]
+            Vp = 1./s_p
+            Vs = 1./s_s
+            sc_p += deltam[2*ncells:2*ncells+nsta,0].getA1()
+            sc_s += deltam[2*ncells+nsta:,0].getA1()
+
+            if par.save_V:
+                if par.verbose:
+                    print('                Saving Velocity models')
+                if 'vtk' in sys.modules:
+                    grid.to_vtk(Vp.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
+                else:
+                    grid.toXdmf(Vp.getA(), 'Vp', 'Vp{0:02d}'.format(it+1))
+                if par.invert_VsVp:
+                    if 'vtk' in sys.modules:
+                        grid.to_vtk(SsSp.getA(), 'VsVp', 'VsVp{0:02d}'.format(it+1))
+                    else:
+                        grid.toXdmf(SsSp.getA(), 'VsVp', 'VsVp{0:02d}'.format(it+1))
+                if 'vtk' in sys.modules:
+                    grid.to_vtk(Vs.getA(), 'Vs', 'Vs{0:02d}'.format(it+1))
+                else:
+                    grid.toXdmf(Vs.getA(), 'Vs', 'Vs{0:02d}'.format(it+1))
+
+        if nev > 0:
+            if par.verbose:
+                print('Iteration {0:d} - Relocating events'.format(it+1))
+                sys.stdout.flush()
+
+            if grid.nthreads == 1 or nev < grid.nthreads:
+                for ne in range(nev):
+                    _relocPS(ne, par, (grid, grid_s), evID, hyp0, data, rcv, tobs, (s_p.getA1(), s_s.getA1()), (indp, inds))
+            else:
+                # run in parallel
+                blk_size = np.zeros((grid.nthreads,), dtype=np.int64)
+                nj = nev
+                while nj > 0:
+                    for n in range(grid.nthreads):
+                        blk_size[n] += 1
+                        nj -= 1
+                        if nj == 0:
+                            break
+                processes = []
+                blk_start = 0
+                h_queue = Queue()
+                for n in range(grid.nthreads):
+                    blk_end = blk_start + blk_size[n]
+                    p = Process(target=_rlPS_worker,
+                                args=(n, blk_start, blk_end, par, (grid, grid_s), evID, hyp0,
+                                      data, rcv, tobs, (s_p.getA1(), s_s.getA1()), (indp, inds), h_queue),
+                                daemon=True)
+                    processes.append(p)
+                    p.start()
+                    blk_start += blk_size[n]
+
+                for ne in range(nev):
+                    h, indh = h_queue.get()
+                    hyp0[indh, :] = h
+
+    if par.invert_vel:
+        if nev > 0:
+            hyp = np.empty((nttp,5))
+            for ne in np.arange(nev):
+                indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+                indrp = np.nonzero(np.logical_and(data[:,0] == evID[ne], indp))[0]
+                for i in indrp:
+                    hyp[i,:] = hyp0[indh[0],:]
+
+            tcalcp = grid.raytrace(s_p.getA1(), hyp, rcv_datap)
+
+            hyp = np.empty((ntts,5))
+            for ne in np.arange(nev):
+                indh = np.nonzero(hyp0[:,0] == evID[ne])[0]
+                indrs = np.nonzero(np.logical_and(data[:,0] == evID[ne], inds))[0]
+                for i in indrs:
+                    hyp[i-nttp,:] = hyp0[indh[0],:]
+            tcalcs = grid_s.raytrace(s_s.getA1(), hyp, rcv_datas)
+
+            tcalc = np.hstack((tcalcp, tcalcs))
+        else:
+            tcalc = np.array([])
+
+        if ncal > 0:
+            tcalcp_cal = grid.raytrace(s_p.getA1(), hcalp, rcv_calp)
+            tcalcs_cal = grid_s.raytrace(s_s.getA1(), hcals, rcv_cals)
+            tcalc_cal = np.hstack((tcalcp_cal, tcalcs_cal))
+        else:
+            tcalc_cal = np.array([])
+
+        r1a = tobs - tcalc
+        r1 = tcal - tcalc_cal
+        if r1a.size > 0:
+            r1 = np.hstack((np.zeros(data.shape[0]-4*nev), r1))
+
+        if par.show_plots:
+            plt.figure(1)
+            plt.cla()
+            plt.plot(r1a,'o')
+            plt.title('Residuals - Final step')
+            plt.show(block=False)
+            plt.pause(0.0001)
+
+        r1 = np.matrix( r1.reshape(-1,1) )
+        r1a = np.matrix( r1a.reshape(-1,1) )
+
+        resV[-1] = np.linalg.norm(np.hstack((tobs-tcalc, tcal-tcalc_cal)))
+
+    if par.verbose:
+        print('\n ** Inversion complete **\n', flush=True)
 
     return hyp0, (Vp.getA1(), Vs.getA1()), (sc_p, sc_s), (resV, resAxb)
 
@@ -2151,40 +3648,64 @@ if __name__ == '__main__':
     y = np.arange(ymin, ymax, dx)
     z = np.arange(zmin, zmax, dx)
 
-    nthreads = 4
-    g = Grid3D(x, y, z, nthreads)
+    nthreads = 1
+    g1 = Grid3D(x, y, z, nthreads)
+
+    g2 = Grid3Dc(x, y, z, nthreads)
 
     testK = False
     testP = False
-    testPS = True
+    testPS = False
     testParallel = False
     addNoise = True
+    testC = True
+    testCp = False
+    testCps = True
 
     if testK:
 
+        g = g2
+        xx = x[1:] - dx/2
+        yy = y[1:] - dx/2
+        zz = z[1:] - dx/2
+        
         Kx, Ky, Kz = g.computeK()
+        
+        plt.figure(figsize=(9,3))
+        plt.subplot(131)
+        plt.imshow(Kx.toarray())
+        plt.subplot(132)
+        plt.imshow(Ky.toarray())
+        plt.subplot(133)
+        plt.imshow(Kz.toarray())
+        plt.show(block=False)
+        
+        print(g.shape)
 
         V = np.ones(g.shape)
         V[5:9,5:10,3:8] = 2.
 
-        plt.figure(figsize=(10,8))
+        plt.figure(figsize=(8,6))
         plt.subplot(221)
-        plt.pcolor(x,z,np.squeeze(V[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.pcolor(xx,zz,np.squeeze(V[:,8,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.grid()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(y,z,np.squeeze(V[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.pcolor(yy,zz,np.squeeze(V[7,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.grid()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(x,y,np.squeeze(V[:,:,6].T), cmap='CMRmap')
+        plt.pcolor(xx,yy,np.squeeze(V[:,:,6].T), cmap='CMRmap')
+        plt.grid()
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.colorbar()
 
-        plt.show()
+        plt.show(block=False)
 
 
         dVx = np.reshape(Kx.dot(V.flatten()), g.shape)
@@ -2195,76 +3716,76 @@ if __name__ == '__main__':
         dV = np.reshape(K.dot(V.flatten()), g.shape)
 
 
-        plt.figure(figsize=(10,8))
+        plt.figure(figsize=(8,6))
         plt.subplot(221)
-        plt.pcolor(x,z,np.squeeze(dVx[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.pcolor(xx,zz,np.squeeze(dVx[:,8,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(y,z,np.squeeze(dVx[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.pcolor(yy,zz,np.squeeze(dVx[7,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(x,y,np.squeeze(dVx[:,:,6].T), cmap='CMRmap')
+        plt.pcolor(xx,yy,np.squeeze(dVx[:,:,6].T), cmap='CMRmap')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.colorbar()
 
-        plt.show()
+        plt.show(block=False)
 
-        plt.figure(figsize=(10,8))
+        plt.figure(figsize=(8,6))
         plt.subplot(221)
-        plt.pcolor(x,z,np.squeeze(dVy[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.pcolor(xx,zz,np.squeeze(dVy[:,8,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(y,z,np.squeeze(dVy[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.pcolor(yy,zz,np.squeeze(dVy[7,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(x,y,np.squeeze(dVy[:,:,6].T), cmap='CMRmap')
+        plt.pcolor(xx,yy,np.squeeze(dVy[:,:,6].T), cmap='CMRmap')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.colorbar()
 
-        plt.show()
+        plt.show(block=False)
 
-        plt.figure(figsize=(10,8))
+        plt.figure(figsize=(8,6))
         plt.subplot(221)
-        plt.pcolor(x,z,np.squeeze(dVz[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.pcolor(xx,zz,np.squeeze(dVz[:,8,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(y,z,np.squeeze(dVz[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.pcolor(yy,zz,np.squeeze(dVz[7,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(x,y,np.squeeze(dVz[:,:,6].T), cmap='CMRmap')
+        plt.pcolor(xx,yy,np.squeeze(dVz[:,:,6].T), cmap='CMRmap')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.colorbar()
 
-        plt.show()
+        plt.show(block=False)
 
-        plt.figure(figsize=(10,8))
+        plt.figure(figsize=(8,6))
         plt.subplot(221)
-        plt.pcolor(x,z,np.squeeze(dV[:,10,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.pcolor(xx,zz,np.squeeze(dV[:,8,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(y,z,np.squeeze(dV[10,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.pcolor(yy,zz,np.squeeze(dV[7,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(x,y,np.squeeze(dV[:,:,6].T), cmap='CMRmap')
+        plt.pcolor(xx,yy,np.squeeze(dV[:,:,6].T), cmap='CMRmap')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.colorbar()
@@ -2273,6 +3794,8 @@ if __name__ == '__main__':
 
 
     if testP or testPS or testParallel:
+        
+        g = g1
 
         rcv = np.array([[0.112, 0.115, 0.013],
                         [0.111, 0.116, 0.040],
@@ -2387,6 +3910,8 @@ if __name__ == '__main__':
 
     if testParallel:
 
+        g = g1 
+        
         tt = g.raytrace(slowness, src, rcv_data)
         tt, rays, v0 = g.raytrace(slowness, src, rcv_data)
         tt, rays, v0, M = g.raytrace(slowness, src, rcv_data)
@@ -2397,6 +3922,8 @@ if __name__ == '__main__':
 
     if testP:
 
+        g = g1
+        
         tt += noise_variance*np.random.randn(tt.size)
 
         data = np.hstack((src[:,0].reshape((-1,1)), tt.reshape((-1,1)), ircv_data))
@@ -2466,6 +3993,8 @@ if __name__ == '__main__':
 
     if testPS:
 
+        g = g1
+        
         Vpts_s = np.array([[Vs, 0.100, 0.100, 0.001, 1.0],
                            [Vs, 0.100, 0.200, 0.001, 1.0],
                            [Vs, 0.200, 0.100, 0.001, 1.0],
@@ -2590,3 +4119,317 @@ if __name__ == '__main__':
         plt.ylabel('Correction')
         plt.legend()
         plt.show()
+
+
+    if testC:
+        
+        g = g2
+        xx = x[1:] - dx/2
+        yy = y[1:] - dx/2
+        zz = z[1:] - dx/2
+        
+        rcv = np.array([[0.112, 0.115, 0.013],
+                        [0.111, 0.116, 0.040],
+                        [0.111, 0.113, 0.090],
+                        [0.151, 0.117, 0.017],
+                        [0.180, 0.115, 0.016],
+                        [0.113, 0.145, 0.011],
+                        [0.160, 0.150, 0.017],
+                        [0.185, 0.149, 0.015],
+                        [0.117, 0.184, 0.011],
+                        [0.155, 0.192, 0.009],
+                        [0.198, 0.198, 0.010],
+                        [0.198, 0.196, 0.040],
+                        [0.198, 0.193, 0.090]])
+        ircv = np.arange(rcv.shape[0]).reshape(-1,1)
+        nsta = rcv.shape[0]
+
+        nev = 15
+        src = np.vstack((np.arange(nev),
+                         np.linspace(0., 50., nev) + np.random.randn(nev),
+                         0.160 + 0.005*np.random.randn(nev),
+                         0.140 + 0.005*np.random.randn(nev),
+                         0.060 + 0.010*np.random.randn(nev))).T
+
+        hinit = np.vstack((np.arange(nev),
+                           np.linspace(0., 50., nev),
+                           0.150 + 0.0001*np.random.randn(nev),
+                           0.150 + 0.0001*np.random.randn(nev),
+                           0.050 + 0.0001*np.random.randn(nev))).T
+
+        h_true = src.copy()
+
+        def Vz(z):
+            return 4.0 + 10.*(z-0.050)
+        def Vz2(z):
+            return 4.0 + 7.5*(z-0.050)
+
+        Vp = np.kron(Vz(zz), np.ones((g.shape[0], g.shape[1], 1)))
+        Vpinit = np.kron(Vz2(zz), np.ones((g.shape[0], g.shape[1], 1)))
+        Vs = 2.1
+
+        slowness = 1./Vp.flatten()
+
+        src = np.kron(src,np.ones((nsta,1)))
+        rcv_data = np.kron(np.ones((nev,1)), rcv)
+        ircv_data = np.kron(np.ones((nev,1)), ircv)
+
+        tt = g.raytrace(slowness, src, rcv_data)
+
+        Vpts = np.array([[Vz(0.001), 0.100, 0.100, 0.001, 0.0],
+                         [Vz(0.001), 0.100, 0.200, 0.001, 0.0],
+                         [Vz(0.001), 0.200, 0.100, 0.001, 0.0],
+                         [Vz(0.001), 0.200, 0.200, 0.001, 0.0],
+                         [Vz(0.011), 0.112, 0.148, 0.011, 0.0],
+                         [Vz(0.005), 0.152, 0.108, 0.005, 0.0],
+                         [Vz(0.075), 0.152, 0.108, 0.075, 0.0],
+                         [Vz(0.011), 0.192, 0.148, 0.011, 0.0]])
+
+        Vinit = np.mean(Vpts[:,0])
+        Vpinit = Vpinit.flatten()
+
+
+        ncal = 5
+        src_cal = np.vstack((5+np.arange(ncal),
+                         np.zeros(ncal),
+                         0.160 + 0.005*np.random.randn(ncal),
+                         0.130 + 0.005*np.random.randn(ncal),
+                         0.045 + 0.001*np.random.randn(ncal))).T
+
+        src_cal = np.kron(src_cal,np.ones((nsta,1)))
+        rcv_cal = np.kron(np.ones((ncal,1)), rcv)
+        ircv_cal = np.kron(np.ones((ncal,1)), ircv)
+
+        ind = np.ones(rcv_cal.shape[0], dtype=bool)
+        ind[3] = 0
+        ind[13] = 0
+        ind[15] = 0
+        src_cal = src_cal[ind,:]
+        rcv_cal = rcv_cal[ind,:]
+        ircv_cal = ircv_cal[ind,:]
+
+        tcal = g.raytrace(slowness, src_cal, rcv_cal)
+        caldata = np.column_stack((src_cal[:,0], tcal, ircv_cal, src_cal[:,2:], np.zeros(tcal.shape)))
+
+        Vpmin = 3.5
+        Vpmax = 4.5
+        PAp = 1.0
+        Vsmin = 1.9
+        Vsmax = 2.3
+        PAs = 1.0
+        Vlim = (Vpmin, Vpmax, PAp, Vsmin, Vsmax, PAs)
+
+        dVp_max = 0.1
+        dx_max = 0.01
+        dt_max = 0.01
+        dVs_max = 0.1
+        dmax = (dVp_max, dx_max, dt_max, dVs_max)
+
+        λ = 2.
+        γ = 1.
+        α = 1.
+        wzK = 0.1
+        lagran = (λ, γ, α, wzK)
+
+        if addNoise:
+            noise_variance = 1.e-3;  # 1 ms
+        else:
+            noise_variance = 0.0
+
+        par = InvParams(maxit=3, maxit_hypo=10, conv_hypo=0.001, Vlim=Vlim, dmax=dmax,
+                        lagrangians=lagran, invert_vel=True, verbose=True, save_V=True)
+
+    if testCp:
+        
+        tt += noise_variance*np.random.randn(tt.size)
+
+        data = np.hstack((src[:,0].reshape((-1,1)), tt.reshape((-1,1)), ircv_data))
+
+        hinit2, res = hypoloc(data, rcv, Vinit, hinit, 10, 0.001, True)
+        
+        h, V, sc, res = jointHypoVel_c(par, g, data, rcv, Vpinit, hinit2, caldata=caldata, Vpts=Vpts)
+
+        plt.figure()
+        plt.plot(res[0])
+        plt.show(block=False)
+
+        err_xc = hinit2[:,2:5] - h_true[:,2:5]
+        err_xc = np.sqrt(np.sum(err_xc**2, axis=1))
+        err_tc = hinit2[:,1] - h_true[:,1]
+
+        err_x = h[:,2:5] - h_true[:,2:5]
+        err_x = np.sqrt(np.sum(err_x**2, axis=1))
+        err_t = h[:,1] - h_true[:,1]
+
+        plt.figure(figsize=(10,4))
+        plt.subplot(121)
+        plt.plot(err_x,'o',label=r'$\|\|\Delta x\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_x)))
+        plt.plot(err_xc,'r*',label=r'$\|\|\Delta x\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_xc)))
+        plt.ylabel(r'$\Delta x$')
+        plt.xlabel('Event ID')
+        plt.legend()
+        plt.subplot(122)
+        plt.plot(np.abs(err_t),'o',label=r'$\|\|\Delta t\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_t)))
+        plt.plot(np.abs(err_tc),'r*',label=r'$\|\|\Delta t\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_tc)))
+        plt.ylabel(r'$\Delta t$')
+        plt.xlabel('Event ID')
+        plt.legend()
+
+        plt.show(block=False)
+
+        V3d = V.reshape(g.shape)
+
+        plt.figure(figsize=(10,8))
+        plt.subplot(221)
+        plt.pcolor(x,z,np.squeeze(V3d[:,9,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.xlabel('X')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(222)
+        plt.pcolor(y,z,np.squeeze(V3d[8,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.xlabel('Y')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(223)
+        plt.pcolor(x,y,np.squeeze(V3d[:,:,4].T), cmap='CMRmap')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+
+        plt.show(block=False)
+
+        plt.figure()
+        plt.plot(sc,'o')
+        plt.xlabel('Station no')
+        plt.ylabel('Correction')
+        plt.show()
+        
+        print('done')
+        
+    if testCps:
+        
+        Vpts_s = np.array([[Vs, 0.100, 0.100, 0.001, 1.0],
+                           [Vs, 0.100, 0.200, 0.001, 1.0],
+                           [Vs, 0.200, 0.100, 0.001, 1.0],
+                           [Vs, 0.200, 0.200, 0.001, 1.0],
+                           [Vs, 0.112, 0.148, 0.011, 1.0],
+                           [Vs, 0.152, 0.108, 0.005, 1.0],
+                           [Vs, 0.152, 0.108, 0.075, 1.0],
+                           [Vs, 0.192, 0.148, 0.011, 1.0]])
+
+        Vpts = np.vstack((Vpts, Vpts_s))
+
+        slowness_s = 1./Vs + np.zeros(g.getNumberOfCells())
+
+        tt_s = g.raytrace(slowness_s, src, rcv_data)
+
+        tt += noise_variance*np.random.randn(tt.size)
+        tt_s += noise_variance*np.random.randn(tt_s.size)
+
+        # remove some values
+        ind_p = np.ones(tt.shape[0], dtype=bool)
+        ind_p[np.random.randint(ind_p.size,size=25)] = False
+        ind_s = np.ones(tt_s.shape[0], dtype=bool)
+        ind_s[np.random.randint(ind_s.size,size=25)] = False
+
+        data_p = np.hstack((src[ind_p,0].reshape((-1,1)), tt[ind_p].reshape((-1,1)), ircv_data[ind_p,:], np.zeros((np.sum(ind_p),1))))
+        data_s = np.hstack((src[ind_s,0].reshape((-1,1)), tt_s[ind_s].reshape((-1,1)), ircv_data[ind_s,:], np.ones((np.sum(ind_s),1))))
+
+        data = np.vstack((data_p, data_s))
+
+
+        tcal_s = g.raytrace(slowness_s, src_cal, rcv_cal)
+        caldata_s = np.column_stack((src_cal[:,0], tcal_s, ircv_cal, src_cal[:,2:], np.ones(tcal_s.shape)))
+        caldata = np.vstack((caldata, caldata_s))
+
+        Vinit = (Vinit, 2.0)
+
+        hinit2, res = hypolocPS(data, rcv, Vinit, hinit, 10, 0.001, True)
+
+        par.save_V = True
+        par.save_rp = True
+        par.dVs_max = 0.01
+        par.invert_VsVp = False
+        par.constr_sc = False
+        h, V, sc, res = jointHypoVelPS_c(par, g, data, rcv, (Vpinit, 2.0), hinit2, caldata=caldata, Vpts=Vpts)
+
+        plt.figure()
+        plt.plot(res[0])
+        plt.show(block=False)
+
+        err_xc = hinit2[:,2:5] - h_true[:,2:5]
+        err_xc = np.sqrt(np.sum(err_xc**2, axis=1))
+        err_tc = hinit2[:,1] - h_true[:,1]
+
+        err_x = h[:,2:5] - h_true[:,2:5]
+        err_x = np.sqrt(np.sum(err_x**2, axis=1))
+        err_t = h[:,1] - h_true[:,1]
+
+        plt.figure(figsize=(10,4))
+        plt.subplot(121)
+        plt.plot(err_x,'o',label=r'$\|\|\Delta x\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_x)))
+        plt.plot(err_xc,'r*',label=r'$\|\|\Delta x\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_xc)))
+        plt.ylabel(r'$\Delta x$')
+        plt.xlabel('Event ID')
+        plt.legend()
+        plt.subplot(122)
+        plt.plot(np.abs(err_t),'o',label=r'$\|\|\Delta t\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_t)))
+        plt.plot(np.abs(err_tc),'r*',label=r'$\|\|\Delta t\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_tc)))
+        plt.ylabel(r'$\Delta t$')
+        plt.xlabel('Event ID')
+        plt.legend()
+
+        plt.show(block=False)
+
+        V3d = V[0].reshape(g.shape)
+
+        plt.figure(figsize=(10,8))
+        plt.subplot(221)
+        plt.pcolor(x,z,np.squeeze(V3d[:,9,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.xlabel('X')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(222)
+        plt.pcolor(y,z,np.squeeze(V3d[8,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.xlabel('Y')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(223)
+        plt.pcolor(x,y,np.squeeze(V3d[:,:,4].T), cmap='CMRmap')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        plt.suptitle('V_p')
+
+        plt.show(block=False)
+
+        V3d = V[1].reshape(g.shape)
+
+        plt.figure(figsize=(10,8))
+        plt.subplot(221)
+        plt.pcolor(x,z,np.squeeze(V3d[:,9,:].T), cmap='CMRmap',), plt.gca().invert_yaxis()
+        plt.xlabel('X')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(222)
+        plt.pcolor(y,z,np.squeeze(V3d[8,:,:].T), cmap='CMRmap'), plt.gca().invert_yaxis()
+        plt.xlabel('Y')
+        plt.ylabel('Z')
+        plt.colorbar()
+        plt.subplot(223)
+        plt.pcolor(x,y,np.squeeze(V3d[:,:,4].T), cmap='CMRmap')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        plt.suptitle('V_s')
+
+        plt.show(block=False)
+
+        plt.figure()
+        plt.plot(sc[0],'o',label='P-wave')
+        plt.plot(sc[1],'r*',label='s-wave')
+        plt.xlabel('Station no')
+        plt.ylabel('Correction')
+        plt.legend()
+        plt.show()
+
