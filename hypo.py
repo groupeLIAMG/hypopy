@@ -618,17 +618,17 @@ class Grid3D():
         h5f.close()
 
     def to_vtk(self, field, fieldname, filename):
-        
+
         xCoords = numpy_support.numpy_to_vtk(self.x)
         yCoords = numpy_support.numpy_to_vtk(self.y)
         zCoords = numpy_support.numpy_to_vtk(self.z)
-        
+
         rgrid = vtk.vtkRectilinearGrid()
         rgrid.SetDimensions(self.x.size, self.y.size, self.z.size)
         rgrid.SetXCoordinates(xCoords)
         rgrid.SetYCoordinates(yCoords)
         rgrid.SetZCoordinates(zCoords)
-        
+
         scalar = vtk.vtkDoubleArray()
         scalar.SetName(fieldname)
         scalar.SetNumberOfComponents(1)
@@ -637,7 +637,7 @@ class Grid3D():
         for n in range(field.size):
             scalar.SetTuple1(n, tmp[n])
         rgrid.GetPointData().SetScalars(scalar)
-        
+
         writer = vtk.vtkXMLRectilinearGridWriter()
         writer.SetFileName(filename+'.vtr')
         writer.SetInputData(rgrid)
@@ -657,7 +657,7 @@ class Grid3Dc(Grid3D):
         """
         Grid3D.__init__(self, x, y, z, nthreads)
         self.slowness = None
-    
+
     @property
     def shape(self):
         return (self.x.size-1, self.y.size-1, self.z.size-1)
@@ -674,7 +674,7 @@ class Grid3Dc(Grid3D):
                                           1.e-15, 20, True, self.nthreads)
         self.cgrid.set_slowness(slowness)
         self.slowness = slowness
-    
+
     def raytrace(self, slowness, hypo, rcv, thread_no=None):
 
         nout = nargout()
@@ -701,7 +701,7 @@ class Grid3Dc(Grid3D):
             if len(slowness) != self.getNumberOfCells():
                 raise ValueError('Length of slowness vector should equal number of cells')
             self.slowness = slowness
-        
+
         if self.cgrid is None:
             nx = len(self.x) - 1
             ny = len(self.y) - 1
@@ -710,11 +710,11 @@ class Grid3Dc(Grid3D):
             self.cgrid = cgrid3d.Grid3Drc(nx, ny, nz, self.dx,
                                           self.x[0], self.y[0], self.z[0],
                                           1.e-15, 20, True, self.nthreads)
-        
+
         evID = hypo[:,0]
         eid = np.sort(np.unique(evID))
         nTx = len(eid)
-        
+
         if slowness is not None:
             self.cgrid.set_slowness(slowness)
 
@@ -733,7 +733,7 @@ class Grid3Dc(Grid3D):
                                               int((src[0,2]-self.z[0])/self.dx))]
             v0 = v+np.zeros((rcv.shape[0],))
             return t, r, v0
-        
+
         i0 = np.empty((nTx,), dtype=np.int64)
         for n in range(nTx):
             for nn in range(evID.size):
@@ -754,7 +754,7 @@ class Grid3Dc(Grid3D):
             rays = [ [0.0] for n in range(rcv.shape[0])]
         if nout == 4:
             L = [ [] for i in range(nTx) ]
-            
+
         if nTx < self.nthreads or self.nthreads == 1:
             if nout == 1:
                 for n in range(nTx):
@@ -815,7 +815,7 @@ class Grid3Dc(Grid3D):
                 nout2 = nout-1
             else:
                 nout2 = nout
-            
+
 
             for n in range(self.nthreads):
                 blk_end = blk_start + blk_size[n]
@@ -1000,17 +1000,17 @@ class Grid3Dc(Grid3D):
         h5f.close()
 
     def to_vtk(self, field, fieldname, filename):
-        
+
         xCoords = numpy_support.numpy_to_vtk(self.x)
         yCoords = numpy_support.numpy_to_vtk(self.y)
         zCoords = numpy_support.numpy_to_vtk(self.z)
-        
+
         rgrid = vtk.vtkRectilinearGrid()
         rgrid.SetDimensions(self.x.size, self.y.size, self.z.size)
         rgrid.SetXCoordinates(xCoords)
         rgrid.SetYCoordinates(yCoords)
         rgrid.SetZCoordinates(zCoords)
-        
+
         scalar = vtk.vtkDoubleArray()
         scalar.SetName(fieldname)
         scalar.SetNumberOfComponents(1)
@@ -1019,7 +1019,7 @@ class Grid3Dc(Grid3D):
         for n in range(field.size):
             scalar.SetTuple1(n, tmp[n])
         rgrid.GetCellData().SetScalars(scalar)
-        
+
         writer = vtk.vtkXMLRectilinearGridWriter()
         writer.SetFileName(filename+'.vtr')
         writer.SetInputData(rgrid)
@@ -1028,9 +1028,9 @@ class Grid3Dc(Grid3D):
 
 
 
-            
-            
-    
+
+
+
 class InvParams():
     def __init__(self, maxit, maxit_hypo, conv_hypo, Vlim, dmax, lagrangians,
                  invert_vel=True, invert_VsVp=True, hypo_2step=False,
@@ -1537,7 +1537,7 @@ def jointHypoVel_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
     ----------
     par     : instance of InvParams
     grid    : instance of Grid3D
-    data    : a numpy array with 5 columns
+    data    : a numpy array with 3 columns
                1st column is event ID number
                2nd column is arrival time
                3rd column is receiver index
@@ -1558,7 +1558,7 @@ def jointHypoVel_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
                for efficiency reason when computing matrix M, initial hypocenters
                should _not_ be equal for any two event, e.g. they shoud all be
                different
-    caldata : calibration shot data, numpy array with 8 columns
+    caldata : calibration shot data, numpy array with 6 columns
                1st column is cal shot ID number
                2nd column is arrival time
                3rd column is receiver index
@@ -1647,7 +1647,7 @@ def jointHypoVel_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         P = sp.csr_matrix(np.ones(ncells).reshape(-1,1))
         dP = sp.csr_matrix((np.ones(ncells), (np.arange(ncells,dtype=np.int64),
                                      np.arange(ncells,dtype=np.int64))), shape=(ncells,ncells))
-        
+
         Spmax = 1. / par.Vpmin
         Spmin = 1. / par.Vpmax
 
@@ -2195,6 +2195,10 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
     datap = data[indp,:]
     datas = data[inds,:]
     data = np.vstack((datap, datas))
+    # update indices
+    indp = data[:,3] == 0.0
+    inds = data[:,3] == 1.0
+
 
     rcv_datap = np.empty((nttp,3))
     rcv_datas = np.empty((ntts,3))
@@ -2224,6 +2228,9 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), Vpt
         caldatap = caldata[indcalp,:]
         caldatas = caldata[indcals,:]
         caldata = np.vstack((caldatap, caldatas))
+        # update indices
+        indcalp = caldata[:,6] == 0.0
+        indcals = caldata[:,6] == 1.0
 
         hcalp = np.column_stack((caldata[indcalp,0], np.zeros(nttcalp), caldata[indcalp,3:6]))
         hcals = np.column_stack((caldata[indcals,0], np.zeros(nttcals), caldata[indcals,3:6]))
@@ -2844,6 +2851,9 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), V
     datap = data[indp,:]
     datas = data[inds,:]
     data = np.vstack((datap, datas))
+    # update indices
+    indp = data[:,3] == 0.0
+    inds = data[:,3] == 1.0
 
     rcv_datap = np.empty((nttp,3))
     rcv_datas = np.empty((ntts,3))
@@ -2873,6 +2883,9 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), V
         caldatap = caldata[indcalp,:]
         caldatas = caldata[indcals,:]
         caldata = np.vstack((caldatap, caldatas))
+        # update indices
+        indcalp = caldata[:,6] == 0.0
+        indcals = caldata[:,6] == 1.0
 
         hcalp = np.column_stack((caldata[indcalp,0], np.zeros(nttcalp), caldata[indcalp,3:6]))
         hcals = np.column_stack((caldata[indcals,0], np.zeros(nttcals), caldata[indcals,3:6]))
@@ -2935,7 +2948,7 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), V
         dP = sp.csr_matrix((np.ones(2*ncells), (np.arange(2*ncells,dtype=np.int64),
                             np.arange(2*ncells,dtype=np.int64))),
                             shape=(2*ncells,2*ncells))
-        
+
         Spmin = 1./par.Vpmax
         Spmax = 1./par.Vpmin
         Ssmin = 1./par.Vsmax
@@ -3012,8 +3025,8 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]), V
         resAxb = None
 
     if par.invert_VsVp:
-        SsSpmin = par.Vsmin/par.Vpmax
-        SsSpmax = par.Vsmax/par.Vpmin
+        SsSpmin = par.Vpmin/par.Vsmax
+        SsSpmax = par.Vpmax/par.Vsmin
 
     if par.verbose:
         print('\nStarting iterations')
@@ -3633,6 +3646,7 @@ def _save_raypaths(rays, filename):
     writer.Update()
 
 
+# %% main
 if __name__ == '__main__':
 
     xmin = 0.090
@@ -3653,14 +3667,14 @@ if __name__ == '__main__':
 
     g2 = Grid3Dc(x, y, z, nthreads)
 
-    testK = False
+    testK = True
     testP = False
     testPS = False
     testParallel = False
-    addNoise = True
-    testC = True
+    addNoise = False
+    testC = False
     testCp = False
-    testCps = True
+    testCps = False
 
     if testK:
 
@@ -3668,9 +3682,9 @@ if __name__ == '__main__':
         xx = x[1:] - dx/2
         yy = y[1:] - dx/2
         zz = z[1:] - dx/2
-        
+
         Kx, Ky, Kz = g.computeK()
-        
+
         plt.figure(figsize=(9,3))
         plt.subplot(131)
         plt.imshow(Kx.toarray())
@@ -3679,8 +3693,8 @@ if __name__ == '__main__':
         plt.subplot(133)
         plt.imshow(Kz.toarray())
         plt.show(block=False)
-        
-        print(g.shape)
+
+        print(g.shape, Kx.shape, Ky.shape, Kz.shape)
 
         V = np.ones(g.shape)
         V[5:9,5:10,3:8] = 2.
@@ -3794,7 +3808,7 @@ if __name__ == '__main__':
 
 
     if testP or testPS or testParallel:
-        
+
         g = g1
 
         rcv = np.array([[0.112, 0.115, 0.013],
@@ -3910,8 +3924,8 @@ if __name__ == '__main__':
 
     if testParallel:
 
-        g = g1 
-        
+        g = g1
+
         tt = g.raytrace(slowness, src, rcv_data)
         tt, rays, v0 = g.raytrace(slowness, src, rcv_data)
         tt, rays, v0, M = g.raytrace(slowness, src, rcv_data)
@@ -3923,7 +3937,7 @@ if __name__ == '__main__':
     if testP:
 
         g = g1
-        
+
         tt += noise_variance*np.random.randn(tt.size)
 
         data = np.hstack((src[:,0].reshape((-1,1)), tt.reshape((-1,1)), ircv_data))
@@ -3994,7 +4008,7 @@ if __name__ == '__main__':
     if testPS:
 
         g = g1
-        
+
         Vpts_s = np.array([[Vs, 0.100, 0.100, 0.001, 1.0],
                            [Vs, 0.100, 0.200, 0.001, 1.0],
                            [Vs, 0.200, 0.100, 0.001, 1.0],
@@ -4122,12 +4136,12 @@ if __name__ == '__main__':
 
 
     if testC:
-        
+
         g = g2
         xx = x[1:] - dx/2
         yy = y[1:] - dx/2
         zz = z[1:] - dx/2
-        
+
         rcv = np.array([[0.112, 0.115, 0.013],
                         [0.111, 0.116, 0.040],
                         [0.111, 0.113, 0.090],
@@ -4240,13 +4254,13 @@ if __name__ == '__main__':
                         lagrangians=lagran, invert_vel=True, verbose=True, save_V=True)
 
     if testCp:
-        
+
         tt += noise_variance*np.random.randn(tt.size)
 
         data = np.hstack((src[:,0].reshape((-1,1)), tt.reshape((-1,1)), ircv_data))
 
         hinit2, res = hypoloc(data, rcv, Vinit, hinit, 10, 0.001, True)
-        
+
         h, V, sc, res = jointHypoVel_c(par, g, data, rcv, Vpinit, hinit2, caldata=caldata, Vpts=Vpts)
 
         plt.figure()
@@ -4303,11 +4317,11 @@ if __name__ == '__main__':
         plt.xlabel('Station no')
         plt.ylabel('Correction')
         plt.show()
-        
+
         print('done')
-        
+
     if testCps:
-        
+
         Vpts_s = np.array([[Vs, 0.100, 0.100, 0.001, 1.0],
                            [Vs, 0.100, 0.200, 0.001, 1.0],
                            [Vs, 0.200, 0.100, 0.001, 1.0],
@@ -4432,4 +4446,3 @@ if __name__ == '__main__':
         plt.ylabel('Correction')
         plt.legend()
         plt.show()
-
