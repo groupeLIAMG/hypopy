@@ -2640,7 +2640,7 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                     blk_end = blk_start + blk_size[n]
                     p = Process(target=_rlPS_worker,
                                 args=(n, blk_start, blk_end, par, (grid, grid_s), evID, hyp0,
-                                      data, rcv, tobs, (s_p.getA1(), s_s.getA1()), (indp, inds), h_queue),
+                                      data, rcv, tobs, (s_p, s_s), (indp, inds), h_queue),
                                 daemon=True)
                     processes.append(p)
                     p.start()
