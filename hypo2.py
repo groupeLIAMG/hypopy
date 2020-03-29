@@ -2201,6 +2201,7 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             u1 = np.zeros(2*nslowness+2*nsta)
             u1Tu1 = sp.csr_matrix((2*nslowness+2*nsta, 2*nslowness+2*nsta))
 
+        Vpts2 = Vpts.copy()
         if Vpts.size > 0:
 
             if par.verbose:
@@ -2208,7 +2209,6 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 sys.stdout.flush()
 
             if par.invert_VsVp:
-                Vpts2 = Vpts.copy()
                 i_p = np.nonzero(Vpts[:, 4] == 0.0)[0]
                 i_s = np.nonzero(Vpts[:, 4] == 1.0)[0]
                 for i in i_s:
@@ -3632,7 +3632,8 @@ if __name__ == '__main__':
         par.invert_VsVp = False
         par.constr_sc = False
         h, V, sc, res = jointHypoVelPS_c(par, g, data, rcv, (Vpinit, 2.0),
-                                         hinit2, caldata=caldata, Vpts=Vpts)
+                                         hinit2, caldata=caldata,
+                                         Vpts=Vpts)
 
         plt.figure()
         plt.plot(res[0])
