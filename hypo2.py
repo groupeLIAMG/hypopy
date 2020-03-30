@@ -2074,7 +2074,7 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
     sc_s = np.zeros(nsta)
     hyp0 = hinit.copy()
 
-    # set origin time to 0 and ofset data accordingly
+    # set origin time to 0 and offset data accordingly
     hyp0_dt = {}
     for n in range(hyp0.shape[0]):
         hyp0_dt[hyp0[n, 0]] = hyp0[n, 1]
@@ -2181,8 +2181,11 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
     else:
         s = np.hstack((s_p, s_s))
 
-    grid.to_vtk({'Slowness': s_p}, 'init_p')
-    grid_s.to_vtk({'Slowness': s_s}, 'init_s')
+    # translate dVp_max into slowness (use mean Vp)
+    Vp_mean = np.mean(Vp)
+    dVp_max = 1./Vp_mean - 1./(Vp_mean + par.dVp_max)
+    Vs_mean = np.mean(Vs)
+    dVs_max = 1./Vs_mean - 1./(Vs_mean + par.dVs_max)
 
     if par.verbose:
         print('\n *** Joint hypocenter-velocity inversion  -- P and S-wave data ***\n')
@@ -2599,16 +2602,16 @@ def jointHypoVelPS_c(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             deltam = x[0]
             resAxb[it] = np.linalg.norm(A*deltam - b)
 
-            dmean = np.mean(np.abs(deltam[:nslowness]))
-            if dmean > par.dVp_max:
+            dmax = np.max(np.abs(deltam[:nslowness]))
+            if dmax > dVp_max:
                 if par.verbose:
-                    print('  Scaling P slowness perturbations by {0:e}'.format(1./(par.dVp_max*dmean)))
-                deltam[:nslowness] = deltam[:nslowness] / (par.dVp_max*dmean)
-            dmean = np.mean(np.abs(deltam[nslowness:2*nslowness]))
-            if dmean > par.dVs_max:
+                    print('  Scaling P slowness perturbations by {0:e}'.format(1./(dVp_max*dmax)))
+                deltam[:nslowness] = deltam[:nslowness] / (dVp_max*dmax)
+            dmax = np.max(np.abs(deltam[nslowness:2*nslowness]))
+            if dmax > dVs_max:
                 if par.verbose:
-                    print('  Scaling S slowness perturbations by {0:e}'.format(1./(par.dVs_max*dmean)))
-                deltam[nslowness:2*nslowness] = deltam[nslowness:2*nslowness] / (par.dVs_max*dmean)
+                    print('  Scaling S slowness perturbations by {0:e}'.format(1./(dVs_max*dmax)))
+                deltam[nslowness:2*nslowness] = deltam[nslowness:2*nslowness] / (dVs_max*dmax)
 
             s += deltam[:2*nslowness]
             s_p = s[:nslowness]
