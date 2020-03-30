@@ -148,6 +148,20 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
     loc = hinit.copy()
     res = np.zeros((evID.size, maxit))
     nev = 0
+        
+    # set origin time to 0 and offset data accordingly
+    hyp0_dt = {}
+    for n in range(loc.shape[0]):
+        hyp0_dt[loc[n, 0]] = loc[n, 1]
+        loc[n, 1] -= hyp0_dt[loc[n, 0]]
+
+    for n in range(data.shape[0]):
+        try:
+            dt = hyp0_dt[data[n, 0]]
+            data[n, 1] -= dt
+        except KeyError():
+            raise ValueError('Event '+str(data[n, 0])+' not found in hinit')
+
     for eid in evID:
         ind = eid == data[:, 0]
 
@@ -187,8 +201,9 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
             res[nev, it] = np.linalg.norm(r)
 
             #dh,residuals,rank, s = lsqsq(H, r)
-            dh = np.linalg.solve(H.T.dot(H), H.T.dot(r))
-            if not np.all(np.isfinite(dh)):
+            try:
+                dh = np.linalg.solve(H.T.dot(H), H.T.dot(r))
+            except np.linalg.linalg.LinAlgError:
                 try:
                     U,S,VVh = np.linalg.svd(H.T.dot(H)+1e-9*np.eye(4))
                     VV = VVh.T
@@ -210,6 +225,10 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
                 sys.stdout.flush()
 
         nev += 1
+
+    # add time offset
+    for n in range(loc.shape[0]):
+        loc[n, 1] += hyp0_dt[loc[n, 0]]
 
     if verbose:
         print('\n ** Inversion complete **\n', flush=True)
