@@ -1,5 +1,16 @@
 # -*- coding: utf-8 -*-
 """
+HYPOcenter location from arrival time data in PYthon
+
+There are currently 4 hypocenter location functions in this module
+
+hypoloc : Locate hypocenters for constant velocity model
+hypolocPS : Locate hypocenters from P- and S-wave arrival time data for constant velocity models
+jointHypoVel : Joint hypocenter-velocity inversion on a regular grid (cubic cells)
+jointHypoVelPS : Joint hypocenter-velocity inversion of P- and S-wave arrival time data
+
+See the tutorials for some examples. There is also a notebook about the theory.
+
 Created on Wed Nov  2 10:29:32 2016
 
 @author: giroux
