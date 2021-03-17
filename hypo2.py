@@ -710,15 +710,15 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 print('Iteration {0:d} - Relocating events'.format(it + 1))
                 sys.stdout.flush()
 
-            if grid.nthreads == 1 or nev < grid.nthreads:
+            if grid.n_threads == 1 or nev < grid.n_threads:
                 for ne in range(nev):
                     _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs)
             else:
                 # run in parallel
-                blk_size = np.zeros((grid.nthreads,), dtype=np.int64)
+                blk_size = np.zeros((grid.n_threads,), dtype=np.int64)
                 nj = nev
                 while nj > 0:
-                    for n in range(grid.nthreads):
+                    for n in range(grid.n_threads):
                         blk_size[n] += 1
                         nj -= 1
                         if nj == 0:
@@ -726,7 +726,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 processes = []
                 blk_start = 0
                 h_queue = Queue()
-                for n in range(grid.nthreads):
+                for n in range(grid.n_threads):
                     blk_end = blk_start + blk_size[n]
                     p = Process(
                         target=_rl_worker,
@@ -1024,9 +1024,9 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
     res : residuals
     """
 
-    if grid.nthreads > 1:
+    if grid.n_threads > 1:
         # we need a second instance for parallel computations
-        grid_s = Grid3d(grid.x, grid.y, grid.z, grid.nthreads,
+        grid_s = Grid3d(grid.x, grid.y, grid.z, grid.n_threads,
                         cell_slowness=True)
     else:
         grid_s = grid
@@ -1649,16 +1649,16 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 print('Iteration {0:d} - Relocating events'.format(it + 1))
                 sys.stdout.flush()
 
-            if grid.nthreads == 1 or nev < grid.nthreads:
+            if grid.n_threads == 1 or nev < grid.n_threads:
                 for ne in range(nev):
                     _relocPS(ne, par, (grid, grid_s), evID, hyp0, data, rcv,
                              tobs, (s_p, s_s), (indp, inds))
             else:
                 # run in parallel
-                blk_size = np.zeros((grid.nthreads,), dtype=np.int64)
+                blk_size = np.zeros((grid.n_threads,), dtype=np.int64)
                 nj = nev
                 while nj > 0:
-                    for n in range(grid.nthreads):
+                    for n in range(grid.n_threads):
                         blk_size[n] += 1
                         nj -= 1
                         if nj == 0:
@@ -1666,7 +1666,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 processes = []
                 blk_start = 0
                 h_queue = Queue()
-                for n in range(grid.nthreads):
+                for n in range(grid.n_threads):
                     blk_end = blk_start + blk_size[n]
                     p = Process(
                         target=_rlPS_worker,
@@ -2046,9 +2046,6 @@ if __name__ == '__main__':
     if testK:
 
         g = g2
-        xx = x[1:] - dx / 2
-        yy = y[1:] - dx / 2
-        zz = z[1:] - dx / 2
 
         Kx, Ky, Kz = g.compute_K()
 
@@ -2068,21 +2065,21 @@ if __name__ == '__main__':
 
         plt.figure(figsize=(8, 6))
         plt.subplot(221)
-        plt.pcolor(xx, zz, np.squeeze(V[:, 8, :].T),
+        plt.pcolor(x, z, np.squeeze(V[:, 8, :].T),
                    cmap='CMRmap',), plt.gca().invert_yaxis()
         plt.grid()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(yy, zz, np.squeeze(V[7, :, :].T),
+        plt.pcolor(y, z, np.squeeze(V[7, :, :].T),
                    cmap='CMRmap'), plt.gca().invert_yaxis()
         plt.grid()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(xx, yy, np.squeeze(V[:, :, 6].T), cmap='CMRmap')
+        plt.pcolor(x, y, np.squeeze(V[:, :, 6].T), cmap='CMRmap')
         plt.grid()
         plt.xlabel('X')
         plt.ylabel('Y')
@@ -2099,19 +2096,19 @@ if __name__ == '__main__':
 
         plt.figure(figsize=(8, 6))
         plt.subplot(221)
-        plt.pcolor(xx, zz, np.squeeze(
+        plt.pcolor(x, z, np.squeeze(
             dVx[:, 8, :].T), cmap='CMRmap',), plt.gca().invert_yaxis()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(yy, zz, np.squeeze(
+        plt.pcolor(y, z, np.squeeze(
             dVx[7, :, :].T), cmap='CMRmap'), plt.gca().invert_yaxis()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(xx, yy, np.squeeze(dVx[:, :, 6].T), cmap='CMRmap')
+        plt.pcolor(x, y, np.squeeze(dVx[:, :, 6].T), cmap='CMRmap')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.colorbar()
@@ -2120,19 +2117,19 @@ if __name__ == '__main__':
 
         plt.figure(figsize=(8, 6))
         plt.subplot(221)
-        plt.pcolor(xx, zz, np.squeeze(
+        plt.pcolor(x, z, np.squeeze(
             dVy[:, 8, :].T), cmap='CMRmap',), plt.gca().invert_yaxis()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(yy, zz, np.squeeze(
+        plt.pcolor(y, z, np.squeeze(
             dVy[7, :, :].T), cmap='CMRmap'), plt.gca().invert_yaxis()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(xx, yy, np.squeeze(dVy[:, :, 6].T), cmap='CMRmap')
+        plt.pcolor(x, y, np.squeeze(dVy[:, :, 6].T), cmap='CMRmap')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.colorbar()
@@ -2141,19 +2138,19 @@ if __name__ == '__main__':
 
         plt.figure(figsize=(8, 6))
         plt.subplot(221)
-        plt.pcolor(xx, zz, np.squeeze(
+        plt.pcolor(x, z, np.squeeze(
             dVz[:, 8, :].T), cmap='CMRmap',), plt.gca().invert_yaxis()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(yy, zz, np.squeeze(
+        plt.pcolor(y, z, np.squeeze(
             dVz[7, :, :].T), cmap='CMRmap'), plt.gca().invert_yaxis()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(xx, yy, np.squeeze(dVz[:, :, 6].T), cmap='CMRmap')
+        plt.pcolor(x, y, np.squeeze(dVz[:, :, 6].T), cmap='CMRmap')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.colorbar()
@@ -2162,19 +2159,19 @@ if __name__ == '__main__':
 
         plt.figure(figsize=(8, 6))
         plt.subplot(221)
-        plt.pcolor(xx, zz, np.squeeze(
+        plt.pcolor(x, z, np.squeeze(
             dV[:, 8, :].T), cmap='CMRmap',), plt.gca().invert_yaxis()
         plt.xlabel('X')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(222)
-        plt.pcolor(yy, zz, np.squeeze(
+        plt.pcolor(y, z, np.squeeze(
             dV[7, :, :].T), cmap='CMRmap'), plt.gca().invert_yaxis()
         plt.xlabel('Y')
         plt.ylabel('Z')
         plt.colorbar()
         plt.subplot(223)
-        plt.pcolor(xx, yy, np.squeeze(dV[:, :, 6].T), cmap='CMRmap')
+        plt.pcolor(x, y, np.squeeze(dV[:, :, 6].T), cmap='CMRmap')
         plt.xlabel('X')
         plt.ylabel('Y')
         plt.colorbar()
