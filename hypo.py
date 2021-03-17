@@ -119,7 +119,8 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
                 break
         else:
             if verbose:
-                print('     Reached max number of iteration (' + str(maxit) + ')')
+                print('     Reached max number of iteration (' +
+                      str(maxit) + ')')
                 sys.stdout.flush()
 
         nev += 1
@@ -140,12 +141,13 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
              first column is event ID number
              second column is arrival time
              third column is receiver index
-             fourth column is code for wave phase: 0 for P-wave and 1 for S-wave
+             fourth column is code for wave type: 0 for P-wave and 1 for S-wave
     rcv:  : coordinates of receivers
              first column is easting
              second column is northing
              third column is elevation
-    V     : tuple holding wave velocities, 1st value is for P-wave, 2nd for S-wave
+    V     : tuple holding wave velocities, 1st value is for P-wave,
+            2nd for S-wave
     hinit : initial hypocenter coordinate.  The format is the same as for data
     maxit : max number of iterations
     convh : convergence criterion (units of distance)
@@ -216,7 +218,7 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
             r = t - tcalc
             res[nev, it] = np.linalg.norm(r)
 
-            #dh,residuals,rank, s = lsqsq(H, r)
+            # dh,residuals,rank, s = lsqsq(H, r)
             try:
                 dh = np.linalg.solve(H.T.dot(H), H.T.dot(r))
             except np.linalg.linalg.LinAlgError:
@@ -240,7 +242,8 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
                 break
         else:
             if verbose:
-                print('     Reached max number of iteration (' + str(maxit) + ')')
+                print('     Reached max number of iteration (' +
+                      str(maxit) + ')')
                 sys.stdout.flush()
 
         nev += 1
@@ -279,7 +282,8 @@ class InvParams():
                         λ : weight of smoothing constraint
                         γ : weight of penalty constraint
                         α : weight of velocity data point constraint
-                        wzK   : weight for vertical smoothing (w.r. to horizontal smoothing)
+                        wzK   : weight for vertical smoothing (w.r. to
+                                horizontal smoothing)
         invert_vel  : perform velocity inversion if True (True by default)
         invert_VsVp : find Vs/Vp ratio rather that Vs (True by default)
         hypo_2step  : Hypocenter relocation done in 2 steps (False by default)
@@ -292,7 +296,8 @@ class InvParams():
                         save in vtk format if VTK module can be found
         save_rp     : save ray paths (False by default)
                         VTK module must be installed
-        verbose     : print information message about inversion progression (True by default)
+        verbose     : print information message about inversion progression
+                      (True by default)
 
         """
         self.maxit = maxit
@@ -355,9 +360,9 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                4th column is event northing
                5th column is event elevation
                *** important ***
-               for efficiency reason when computing matrix M, initial hypocenters
-               should _not_ be equal for any two event, e.g. they shoud all be
-               different
+               for efficiency reason when computing matrix M, initial
+               hypocenters should _not_ be equal for any two event, e.g. they
+               shoud all be different
     caldata : calibration shot data, numpy array with 8 columns
                1st column is cal shot ID number
                2nd column is arrival time
@@ -366,7 +371,8 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                5th column is source northing
                6th column is source elevation
                *** important ***
-               cal shot data should sorted by cal shot ID first, then by receiver index
+               cal shot data should sorted by cal shot ID first, then by
+               receiver index
     Vpts    : known velocity points, numpy array with 4 columns
                1st column is velocity
                2nd column is easting
@@ -508,7 +514,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
         if par.invert_vel:
             if par.verbose:
                 print(
-                    '\nIteration {0:d} - Updating velocity model'.format(it + 1))
+                    '\nIteration {0:d} - Updating velocity model'.format(it+1))
                 print('  Updating penalty vector')
                 sys.stdout.flush()
 
@@ -677,9 +683,8 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 b += α * D1.T * (Spts - D * s)
 
             if par.verbose:
-                print(
-                    '    calling minres with system of size {0:d} x {1:d}'.format(
-                        A.shape[0], A.shape[1]))
+                print('    calling minres with system of '
+                      'size {0:d} x {1:d}'.format(A.shape[0], A.shape[1]))
                 sys.stdout.flush()
             x = spl.minres(A, b)
 
@@ -690,7 +695,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             if dmean > par.dVp_max:
                 if par.verbose:
                     print('  Scaling Slowness perturbations by {0:e}'.format(
-                        1. / (par.dVp_max * dmean)))
+                          1. / (par.dVp_max * dmean)))
                 deltam[:nslowness] = deltam[:nslowness] / (par.dVp_max * dmean)
 
             s += deltam[:nslowness]
@@ -861,7 +866,8 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
                     VV = VVh.T
                     deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
                 except np.linalg.linalg.LinAlgError:
-                    print(' - Event could not be relocated, resetting and exiting')
+                    print(' - Event could not be relocated, '
+                          'resetting and exiting')
                     hyp0[indh, :] = hyp_save
                     return hyp_save, indh
 
@@ -872,8 +878,8 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
             new_hyp = hyp0[indh, :].copy()
             new_hyp[2:4] += deltah
             if grid.is_outside(new_hyp[2:].reshape((1, 3))):
-                print(
-                    '  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(
+                print('  Event could not be relocated inside the grid'
+                      ' ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(
                         new_hyp[2],
                         new_hyp[3],
                         new_hyp[4]))
@@ -937,8 +943,8 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
 
         new_hyp = hyp0[indh, 1:] + deltah
         if grid.is_outside(new_hyp[1:].reshape((1, 3))):
-            print(
-                '  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(
+            print('  Event could not be relocated inside the grid'
+                  ' ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(
                     new_hyp[1],
                     new_hyp[2],
                     new_hyp[3]))
@@ -981,7 +987,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                1st column is event ID number
                2nd column is arrival time
                3rd column is receiver index
-               4th column is code for wave phase: 0 for P-wave and 1 for S-wave
+               4th column is code for wave type: 0 for P-wave and 1 for S-wave
                *** important ***
                data should sorted by event ID first, then by receiver index
     rcv:    : coordinates of receivers
@@ -996,9 +1002,9 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                4th column is event northing
                5th column is event elevation
                *** important ***
-               for efficiency reason when computing matrix M, initial hypocenters
-               should _not_ be equal for any two event, e.g. they shoud all be
-               different
+               for efficiency reason when computing matrix M, initial
+               hypocenters should _not_ be equal for any two event, e.g. they
+               shoud all be different
     caldata : calibration shot data, numpy array with 8 columns
                1st column is cal shot ID number
                2nd column is arrival time
@@ -1008,7 +1014,8 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                6th column is source elevation
                7th column is code for wave phase: 0 for P-wave and 1 for S-wave
                *** important ***
-               cal shot data should sorted by cal shot ID first, then by receiver index
+               cal shot data should sorted by cal shot ID first, then by
+               receiver index
     Vpts    : known velocity points, numpy array with 4 columns
                1st column is velocity
                2nd column is easting
@@ -1164,7 +1171,8 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
     dVs_max = 1. / Vs_mean - 1. / (Vs_mean + par.dVs_max)
 
     if par.verbose:
-        print('\n *** Joint hypocenter-velocity inversion  -- P and S-wave data ***\n')
+        print('\n *** Joint hypocenter-velocity inversion'
+              ' -- P and S-wave data ***\n')
 
     if par.invert_vel:
         resV = np.zeros(par.maxit + 1)
@@ -1225,8 +1233,10 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                             Vpts2[i, 0] = Vpts[i, 0] / Vpts[ii, 0]
                             break
                     else:
-                        raise ValueError('Missing Vp data point for Vs data at ({0:f}, {1:f}, {2:f})'.format(
-                            Vpts[i, 1], Vpts[i, 2], Vpts[i, 3]))
+                        raise ValueError('Missing Vp data point for Vs data '
+                                         'at ({0:f}, {1:f}, {2:f})'
+                                         .format(Vpts[i, 1], Vpts[i, 2],
+                                                 Vpts[i, 3]))
 
             else:
                 Vpts2 = Vpts
@@ -1282,8 +1292,8 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
 
         if par.invert_vel:
             if par.verbose:
-                print(
-                    '\nIteration {0:d} - Updating velocity model\n'.format(it + 1))
+                print('\nIteration {0:d} - Updating velocity '
+                      'model\n'.format(it + 1))
                 print('  Updating penalty vector')
                 sys.stdout.flush()
 
@@ -1328,12 +1338,12 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             if par.verbose:
                 npel = np.sum(P[:nslowness] != 0.0)
                 if npel > 0:
-                    print(
-                        '    P-wave penalties applied at {0:d} nodes'.format(npel))
+                    print('    P-wave penalties applied at'
+                          ' {0:d} nodes'.format(npel))
                 npel = np.sum(P[nslowness:2 * nslowness] != 0.0)
                 if npel > 0:
-                    print(
-                        '    S-wave penalties applied at {0:d} nodes'.format(npel))
+                    print('    S-wave penalties applied at'
+                          ' {0:d} nodes'.format(npel))
 
             if par.verbose:
                 print('  Raytracing')
@@ -1443,9 +1453,9 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                             Lsc = sp.block_diag(
                                 (sp.csr_matrix(Lpsc), sp.csr_matrix(Lssc)))
 
-                        # add terms for station corrections after terms for velocity because
-                        # solution vector contains [Vp Vs sc_p sc_s] in that
-                        # order
+                        # add terms for station corrections after terms for
+                        # velocity because solution vector contains
+                        # [Vp Vs sc_p sc_s] in that order
                         Lev[ne] = sp.hstack((Lev[ne], Lsc))
 
             else:
@@ -1595,9 +1605,8 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 b += α * D1.T * (Spts - D * s)
 
             if par.verbose:
-                print(
-                    '    calling minres with system of size {0:d} x {1:d}'.format(
-                        A.shape[0], A.shape[1]))
+                print('    calling minres with system of size'
+                      ' {0:d} x {1:d}'.format(A.shape[0], A.shape[1]))
                 sys.stdout.flush()
             x = spl.minres(A, b)
 
@@ -1607,18 +1616,16 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             dmax = np.max(np.abs(deltam[:nslowness]))
             if dmax > dVp_max:
                 if par.verbose:
-                    print(
-                        '  Scaling P slowness perturbations by {0:e}'.format(
-                            dVp_max / dmax))
+                    print('  Scaling P slowness perturbations '
+                          'by {0:e}'.format(dVp_max / dmax))
                 deltam[:nslowness] = deltam[:nslowness] * dVp_max / dmax
             dmax = np.max(np.abs(deltam[nslowness:2 * nslowness]))
             if dmax > dVs_max:
                 if par.verbose:
-                    print(
-                        '  Scaling S slowness perturbations by {0:e}'.format(
-                            dVs_max / dmax))
-                deltam[nslowness:2 * nslowness] = deltam[nslowness:2 *
-                                                         nslowness] * dVs_max / dmax
+                    print('  Scaling S slowness perturbations '
+                          'by {0:e}'.format(dVs_max / dmax))
+                deltam[nslowness:2*nslowness] = deltam[nslowness:2*nslowness] \
+                    * dVs_max / dmax
 
             s += deltam[:2 * nslowness]
             s_p = s[:nslowness]
@@ -1832,8 +1839,8 @@ def _relocPS(
                                                 return_rays=True)
             except RuntimeError as rte:
                 if 'going outside grid' in str(rte):
-                    print(
-                        '  Problem while computing P-wave traveltimes, resetting and exiting')
+                    print('  Problem while computing P-wave traveltimes, '
+                          'resetting and exiting')
                     hyp0[indh, :] = hyp_save
                     return hyp_save, indh
                 else:
@@ -1848,8 +1855,8 @@ def _relocPS(
                                                 return_rays=True)
             except RuntimeError as rte:
                 if 'going outside grid' in str(rte):
-                    print(
-                        '  Problem while computing S-wave traveltimes, resetting and exiting')
+                    print('  Problem while computing S-wave traveltimes, '
+                          'resetting and exiting')
                     hyp0[indh, :] = hyp_save
                     return hyp_save, indh
                 else:
@@ -1884,7 +1891,8 @@ def _relocPS(
                     VV = VVh.T
                     deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
                 except np.linalg.linalg.LinAlgError:
-                    print(' - Event could not be relocated, resetting and exiting')
+                    print(' - Event could not be relocated, '
+                          'resetting and exiting')
                     hyp0[indh, :] = hyp_save
                     return hyp_save, indh
 
@@ -1895,11 +1903,9 @@ def _relocPS(
             new_hyp = hyp0[indh, :].copy()
             new_hyp[2:4] += deltah
             if grid_p.is_outside(new_hyp[2:5].reshape((1, 3))):
-                print(
-                    '  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(
-                        new_hyp[2],
-                        new_hyp[3],
-                        new_hyp[4]))
+                print('  Event could not be relocated inside the grid '
+                      '({0:f}, {1:f}, {2:f}), resetting and exiting'
+                      .format(new_hyp[2], new_hyp[3], new_hyp[4]))
                 hyp0[indh, :] = hyp_save
                 return hyp_save, indh
 
@@ -1982,11 +1988,9 @@ def _relocPS(
 
         new_hyp = hyp0[indh, 1:] + deltah
         if grid_p.is_outside(new_hyp[1:].reshape((1, 3))):
-            print(
-                '  Event could not be relocated inside the grid ({0:f}, {1:f}, {2:f}), resetting and exiting'.format(
-                    new_hyp[1],
-                    new_hyp[2],
-                    new_hyp[3]))
+            print('  Event could not be relocated inside the grid '
+                  '({0:f}, {1:f}, {2:f}), resetting and exiting'
+                  .format(new_hyp[1], new_hyp[2], new_hyp[3]))
             hyp0[indh, :] = hyp_save
             return hyp_save, indh
 
@@ -2263,7 +2267,8 @@ if __name__ == '__main__':
         ircv_cal = ircv_cal[ind, :]
 
         tcal = g.raytrace(src_cal, rcv_cal, slowness)
-        caldata = np.column_stack((src_cal[:, 0], tcal, ircv_cal, src_cal[:, 2:],
+        caldata = np.column_stack((src_cal[:, 0], tcal, ircv_cal,
+                                   src_cal[:, 2:],
                                    np.zeros(tcal.shape)))
 
         Vpmin = 3.5
@@ -2400,7 +2405,8 @@ if __name__ == '__main__':
         ircv_cal = ircv_cal[ind, :]
 
         tcal = g.raytrace(src_cal, rcv_cal, slowness)
-        caldata = np.column_stack((src_cal[:, 0], tcal, ircv_cal, src_cal[:, 2:], np.zeros(tcal.shape)))
+        caldata = np.column_stack((src_cal[:, 0], tcal, ircv_cal,
+                                   src_cal[:, 2:], np.zeros(tcal.shape)))
 
         Vpmin = 3.5
         Vpmax = 4.5
@@ -2546,18 +2552,25 @@ if __name__ == '__main__':
         ind_s = np.ones(tt_s.shape[0], dtype=bool)
         ind_s[np.random.randint(ind_s.size, size=25)] = False
 
-        data_p = np.hstack((src[ind_p, 0].reshape(
-            (-1, 1)), tt[ind_p].reshape((-1, 1)), ircv_data[ind_p, :], np.zeros((np.sum(ind_p), 1))))
-        data_s = np.hstack((src[ind_s, 0].reshape(
-            (-1, 1)), tt_s[ind_s].reshape((-1, 1)), ircv_data[ind_s, :], np.ones((np.sum(ind_s), 1))))
+        data_p = np.hstack((src[ind_p, 0].reshape((-1, 1)),
+                            tt[ind_p].reshape((-1, 1)),
+                            ircv_data[ind_p, :],
+                            np.zeros((np.sum(ind_p), 1))))
+        data_s = np.hstack((src[ind_s, 0].reshape((-1, 1)),
+                            tt_s[ind_s].reshape((-1, 1)),
+                            ircv_data[ind_s, :],
+                            np.ones((np.sum(ind_s), 1))))
 
         ind = data_s[:, 0] != 8.
 
         data = np.vstack((data_p, data_s[ind, :]))
 
         tcal_s = g.raytrace(src_cal, rcv_cal, slowness_s)
-        caldata_s = np.column_stack(
-            (src_cal[:, 0], tcal_s, ircv_cal, src_cal[:, 2:], np.ones(tcal_s.shape)))
+        caldata_s = np.column_stack((src_cal[:, 0],
+                                     tcal_s,
+                                     ircv_cal,
+                                     src_cal[:, 2:],
+                                     np.ones(tcal_s.shape)))
         caldata = np.vstack((caldata, caldata_s))
 
         Vinit = (Vinit, 2.0)
@@ -2588,16 +2601,19 @@ if __name__ == '__main__':
 
         plt.figure(figsize=(10, 4))
         plt.subplot(121)
-        plt.plot(
-            err_x, 'o', label=r'jhv - $\|\|\Delta x\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_x)))
-        plt.plot(
-            err_xc, 'r*', label=r'cst v - $\|\|\Delta x\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_xc)))
+        label = (r'jhv - $\|\|\Delta x\|\|$ = {0:6.5f}'
+                 .format(np.linalg.norm(err_x)))
+        plt.plot(err_x, 'o', label=label)
+        label = (r'cst v - $\|\|\Delta x\|\|$ = {0:6.5f}'
+                 .format(np.linalg.norm(err_xc)))
+        plt.plot(err_xc, 'r*', label=label)
         plt.ylabel(r'$\Delta x$')
         plt.xlabel('Event ID')
         plt.legend()
         plt.subplot(122)
-        plt.plot(np.abs(err_t), 'o',
-                 label=r'jhv - $\|\|\Delta t\|\|$ = {0:6.5f}'.format(np.linalg.norm(err_t)))
+        label = (r'jhv - $\|\|\Delta t\|\|$ = {0:6.5f}'
+                 .format(np.linalg.norm(err_t)))
+        plt.plot(np.abs(err_t), 'o', label=label)
         plt.plot(
             np.abs(err_tc),
             'r*',
@@ -2662,7 +2678,7 @@ if __name__ == '__main__':
 
         plt.figure()
         plt.plot(sc[0], 'o', label='P-wave')
-        plt.plot(sc[1], 'r*', label='s-wave')
+        plt.plot(sc[1], 'r*', label='S-wave')
         plt.xlabel('Station no')
         plt.ylabel('Correction')
         plt.legend()
