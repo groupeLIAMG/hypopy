@@ -32,36 +32,48 @@ from ttcrpy.rgrid import Grid3d
 # %% hypoloc
 
 
-def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
+def hypoloc(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
     """
     Locate hypocenters for constant velocity model.
 
     Parameters
     ----------
-    data  : a numpy array with 3 columns
+    data  : array_like, shape (m, 3)
+        input data
              first column is event ID number
              second column is arrival time
              third column is receiver index
-    rcv:  : coordinates of receivers
-             first column is easting
-             second column is northing
-             third column is elevation
-    V     : wave velocity
-    hinit : initial hypocenter coordinate.  The format is the same as for data
-    maxit : max number of iterations
-    convh : convergence criterion (units of distance)
+    rcv : array_like, shape (n, 3)
+        coordinates of receivers
+            first column is easting
+            second column is northing
+            third column is elevation
+    V : float
+        wave velocity
+    hinit : array_like, shape (m, 3)
+        initial hypocenter coordinate.  The format is the same as for data
+    maxit : int
+        max number of iterations
+    convh : float
+        convergence criterion (units of distance)
+    tol : float
+        Stopping tolerance
+    verbose : bool
+        run in verbose mode
 
     Returns
     -------
-    loc : hypocenter coordinates
-    res : norm of residuals at each iteration for each event (nev x maxit)
+    loc : ndarray of float
+        hypocenter coordinates
+    res : ndarray of float
+        norm of residuals at each iteration for each event (nev x maxit)
     """
 
     if verbose:
         print('\n *** Hypocenter inversion ***\n')
     evID = np.unique(data[:, 0])
     loc = hinit.copy()
-    res = np.zeros((evID.size, maxit))
+    res = np.zeros((evID.size, maxit+1))
     nev = 0
     for eid in evID:
         ind = eid == data[:, 0]
@@ -77,24 +89,24 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
             print('Locating hypocenters no ' + str(int(1.e-6 + eid)))
             sys.stdout.flush()
 
+        xinit = loc[inh, 2:]
+        tinit = loc[inh, 1]
+
+        dx = x[:, 0] - xinit[0, 0]
+        dy = x[:, 1] - xinit[0, 1]
+        dz = x[:, 2] - xinit[0, 2]
+        ds = np.sqrt(dx * dx + dy * dy + dz * dz)
+        tcalc = tinit + ds / V
+
+        r = t - tcalc
+        res[nev, 0] = np.linalg.norm(r)
+
         for it in range(maxit):
-
-            xinit = loc[inh, 2:]
-            tinit = loc[inh, 1]
-
-            dx = x[:, 0] - xinit[0, 0]
-            dy = x[:, 1] - xinit[0, 1]
-            dz = x[:, 2] - xinit[0, 2]
-            ds = np.sqrt(dx * dx + dy * dy + dz * dz)
-            tcalc = tinit + ds / V
 
             H = np.ones((x.shape[0], 4))
             H[:, 1] = -1.0 / V * dx / ds
             H[:, 2] = -1.0 / V * dy / ds
             H[:, 3] = -1.0 / V * dz / ds
-
-            r = t - tcalc
-            res[nev, it] = np.linalg.norm(r)
 
             # dh,residuals,rank, s = np.linalg.H.T.dot((H, r)
             dh = np.linalg.solve(H.T.dot(H), H.T.dot(r))
@@ -112,7 +124,20 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
                     break
 
             loc[inh, 1:] += dh
-            if np.sum(np.abs(dh[1:]) < convh) == 3:
+
+            xinit = loc[inh, 2:]
+            tinit = loc[inh, 1]
+
+            dx = x[:, 0] - xinit[0, 0]
+            dy = x[:, 1] - xinit[0, 1]
+            dz = x[:, 2] - xinit[0, 2]
+            ds = np.sqrt(dx * dx + dy * dy + dz * dz)
+            tcalc = tinit + ds / V
+
+            r = t - tcalc
+            res[nev, it+1] = np.linalg.norm(r)
+
+            if np.sum(np.abs(dh[1:]) < convh) == 3 or res[nev, it+1] < tol:
                 if verbose:
                     print('     Converged at iteration ' + str(it + 1))
                     sys.stdout.flush()
@@ -131,37 +156,49 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, verbose=False):
     return loc, res
 
 
-def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
+def hypolocPS(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
     """
     Locate hypocenters for constant velocity model
 
     Parameters
     ----------
-    data  : a numpy array with 6 columns
-             first column is event ID number
-             second column is arrival time
-             third column is receiver index
-             fourth column is code for wave type: 0 for P-wave and 1 for S-wave
-    rcv:  : coordinates of receivers
-             first column is easting
-             second column is northing
-             third column is elevation
-    V     : tuple holding wave velocities, 1st value is for P-wave,
-            2nd for S-wave
-    hinit : initial hypocenter coordinate.  The format is the same as for data
-    maxit : max number of iterations
-    convh : convergence criterion (units of distance)
+    data : array_like, shape (m, 6)
+        input data
+            first column is event ID number
+            second column is arrival time
+            third column is receiver index
+            fourth column is code for wave type: 0 for P-wave and 1 for S-wave
+    rcv : array_like, shape (n, 3)
+        coordinates of receivers
+            first column is easting
+            second column is northing
+            third column is elevation
+    V : tuple of float
+        wave velocities, 1st value is for P-wave, 2nd for S-wave
+    hinit : array_like, shape (m, 6)
+        initial hypocenter coordinate.  The format is the same as for data
+    maxit : int
+        max number of iterations
+    convh : float
+        convergence criterion (units of distance)
+    tol : float
+        Stopping tolerance
+    verbose : bool
+        run in verbose mode
 
     Returns
     -------
-    loc : hypocenter coordinates
+    loc : ndarray of float
+        hypocenter coordinates
+    res : ndarray of float, shape (nev, maxit)
+        norm of residuals at each iteration for each event
     """
 
     if verbose:
         print('\n *** Hypocenter inversion  --  P and S-wave data ***\n')
     evID = np.unique(data[:, 0])
     loc = hinit.copy()
-    res = np.zeros((evID.size, maxit))
+    res = np.zeros((evID.size, maxit+1))
     nev = 0
 
     # set origin time to 0 and offset data accordingly
@@ -199,24 +236,24 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
             print('Locating hypocenters no ' + str(int(1.e-6 + eid)))
             sys.stdout.flush()
 
+        xinit = loc[inh, 2:]
+        tinit = loc[inh, 1]
+
+        dx = x[:, 0] - xinit[0, 0]
+        dy = x[:, 1] - xinit[0, 1]
+        dz = x[:, 2] - xinit[0, 2]
+        ds = np.sqrt(dx * dx + dy * dy + dz * dz)
+        tcalc = tinit + ds / vel
+
+        r = t - tcalc
+        res[nev, 0] = np.linalg.norm(r)
+
         for it in range(maxit):
-
-            xinit = loc[inh, 2:]
-            tinit = loc[inh, 1]
-
-            dx = x[:, 0] - xinit[0, 0]
-            dy = x[:, 1] - xinit[0, 1]
-            dz = x[:, 2] - xinit[0, 2]
-            ds = np.sqrt(dx * dx + dy * dy + dz * dz)
-            tcalc = tinit + ds / vel
 
             H = np.ones((x.shape[0], 4))
             H[:, 1] = -1.0 / vel * dx / ds
             H[:, 2] = -1.0 / vel * dy / ds
             H[:, 3] = -1.0 / vel * dz / ds
-
-            r = t - tcalc
-            res[nev, it] = np.linalg.norm(r)
 
             # dh,residuals,rank, s = lsqsq(H, r)
             try:
@@ -235,7 +272,20 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, verbose=False):
                     break
 
             loc[inh, 1:] += dh
-            if np.sum(np.abs(dh[1:]) < convh) == 3:
+
+            xinit = loc[inh, 2:]
+            tinit = loc[inh, 1]
+
+            dx = x[:, 0] - xinit[0, 0]
+            dy = x[:, 1] - xinit[0, 1]
+            dz = x[:, 2] - xinit[0, 2]
+            ds = np.sqrt(dx * dx + dy * dy + dz * dz)
+            tcalc = tinit + ds / vel
+
+            r = t - tcalc
+            res[nev, it+1] = np.linalg.norm(r)
+
+            if np.sum(np.abs(dh[1:]) < convh) == 3 or res[nev, it+1] < tol:
                 if verbose:
                     print('     Converged at iteration ' + str(it + 1))
                     sys.stdout.flush()
