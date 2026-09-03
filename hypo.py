@@ -889,22 +889,12 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
         if par.verbose:
             print('    Updating latitude & longitude', end='')
             sys.stdout.flush()
-        H = np.ones((nst, 2))
         for itt in range(par.maxit_hypo):
             for i in range(nst):
                 hyp[i, :] = hyp0[indh, :]
 
-            tcalc, rays = grid.raytrace(hyp, stn, thread_no=thread_no,
-                                        return_rays=True)
-            s0 = grid.get_s0(hyp)
-            for ns in range(nst):
-                raysi = rays[ns]
-                S0 = s0[ns]
-
-                d = (raysi[1, :] - hyp0[indh, 2:]).flatten()
-                ds = np.sqrt(np.sum(d * d))
-                H[ns, 0] = -S0 * d[0] / ds
-                H[ns, 1] = -S0 * d[1] / ds
+            tcalc, H = grid.compute_H(hyp, stn, full=False,
+                                      thread_no=thread_no)
 
             r = tobs[indr] - tcalc
             x = lstsq(H, r)
@@ -953,23 +943,11 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
         print('    Updating all hypocenter params', end='')
         sys.stdout.flush()
 
-    H = np.ones((nst, 4))
     for itt in range(par.maxit_hypo):
         for i in range(nst):
             hyp[i, :] = hyp0[indh, :]
 
-        tcalc, rays = grid.raytrace(hyp, stn, thread_no=thread_no,
-                                    return_rays=True)
-        s0 = grid.get_s0(hyp)
-        for ns in range(nst):
-            raysi = rays[ns]
-            S0 = s0[ns]
-
-            d = (raysi[1, :] - hyp0[indh, 2:]).flatten()
-            ds = np.sqrt(np.sum(d * d))
-            H[ns, 1] = -S0 * d[0] / ds
-            H[ns, 2] = -S0 * d[1] / ds
-            H[ns, 3] = -S0 * d[2] / ds
+        tcalc, H = grid.compute_H(hyp, stn, thread_no=thread_no)
 
         r = tobs[indr] - tcalc
         x = lstsq(H, r)
