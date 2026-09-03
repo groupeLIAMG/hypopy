@@ -995,6 +995,10 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
     if par.save_rp and 'vtk' in sys.modules and par._final_iteration:
         if par.verbose:
             print('    Saving raypaths')
+        for i in range(nst):
+            hyp[i, :] = hyp0[indh, :]
+        _, rays = grid.raytrace(hyp, stn, thread_no=thread_no,
+                                return_rays=True)
         filename = 'raypaths'
         key = 'ev_{0:d}'.format(int(1.e-6 + evID[ne]))
         grid.to_vtk({key: rays}, filename)
@@ -1857,14 +1861,13 @@ def _relocPS(
         if par.verbose:
             print('    Updating latitude & longitude', end='')
             sys.stdout.flush()
-        H = np.ones((nstp + nsts, 2))
         for itt in range(par.maxit_hypo):
             for i in range(nstp):
                 hypp[i, :] = hyp0[indh, :]
 
             try:
-                tcalcp, raysp = grid_p.raytrace(hypp, stnp, s_p, thread_no,
-                                                return_rays=True)
+                tcalcp, Hp = grid_p.compute_H(hypp, stnp, s_p, full=False,
+                                              thread_no=thread_no)
             except RuntimeError as rte:
                 if 'going outside grid' in str(rte):
                     print('  Problem while computing P-wave traveltimes, '
@@ -1874,13 +1877,12 @@ def _relocPS(
                 else:
                     raise rte
 
-            s0p = grid_p.get_s0(hypp)
             for i in range(nsts):
                 hyps[i, :] = hyp0[indh, :]
 
             try:
-                tcalcs, rayss = grid_s.raytrace(hyps, stns, s_s, thread_no,
-                                                return_rays=True)
+                tcalcs, Hs = grid_s.compute_H(hyps, stns, s_s, full=False,
+                                              thread_no=thread_no)
             except RuntimeError as rte:
                 if 'going outside grid' in str(rte):
                     print('  Problem while computing S-wave traveltimes, '
@@ -1890,23 +1892,7 @@ def _relocPS(
                 else:
                     raise rte
 
-            s0s = grid_s.get_s0(hyps)
-            for ns in range(nstp):
-                raysi = raysp[ns]
-                S0 = s0p[ns]
-
-                d = (raysi[1, :] - hyp0[indh, 2:]).flatten()
-                ds = np.sqrt(np.sum(d * d))
-                H[ns, 0] = -S0 * d[0] / ds
-                H[ns, 1] = -S0 * d[1] / ds
-            for ns in range(nsts):
-                raysi = rayss[ns]
-                S0 = s0s[ns]
-
-                d = (raysi[1, :] - hyp0[indh, 2:]).flatten()
-                ds = np.sqrt(np.sum(d * d))
-                H[ns + nstp, 0] = -S0 * d[0] / ds
-                H[ns + nstp, 1] = -S0 * d[1] / ds
+            H = np.vstack((Hp, Hs))
 
             r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
 
@@ -1954,45 +1940,25 @@ def _relocPS(
         print('    Updating all hypocenter params', end='')
         sys.stdout.flush()
 
-    H = np.ones((nstp + nsts, 4))
     for itt in range(par.maxit_hypo):
         if nstp > 0:
             for i in range(nstp):
                 hypp[i, :] = hyp0[indh, :]
-            tcalcp, raysp = grid_p.raytrace(hypp, stnp, s_p, thread_no,
-                                            return_rays=True)
-            s0p = grid_p.get_s0(hypp)
+            tcalcp, Hp = grid_p.compute_H(hypp, stnp, s_p,
+                                          thread_no=thread_no)
         else:
             tcalcp = np.array([])
-            raysp = []
+            Hp = np.empty((0, 4))
         if nsts > 0:
             for i in range(nsts):
                 hyps[i, :] = hyp0[indh, :]
-            tcalcs, rayss = grid_s.raytrace(hyps, stns, s_s, thread_no,
-                                            return_rays=True)
-            s0s = grid_s.get_s0(hyps)
+            tcalcs, Hs = grid_s.compute_H(hyps, stns, s_s,
+                                          thread_no=thread_no)
         else:
             tcalcs = np.array([])
-            rayss = []
+            Hs = np.empty((0, 4))
 
-        for ns in range(nstp):
-            raysi = raysp[ns]
-            S0 = s0p[ns]
-
-            d = (raysi[1, :] - hyp0[indh, 2:]).flatten()
-            ds = np.sqrt(np.sum(d * d))
-            H[ns, 1] = -S0 * d[0] / ds
-            H[ns, 2] = -S0 * d[1] / ds
-            H[ns, 3] = -S0 * d[2] / ds
-        for ns in range(nsts):
-            raysi = rayss[ns]
-            S0 = s0s[ns]
-
-            d = (raysi[1, :] - hyp0[indh, 2:]).flatten()
-            ds = np.sqrt(np.sum(d * d))
-            H[ns + nstp, 1] = -S0 * d[0] / ds
-            H[ns + nstp, 2] = -S0 * d[1] / ds
-            H[ns + nstp, 3] = -S0 * d[2] / ds
+        H = np.vstack((Hp, Hs))
 
         r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
         x = lstsq(H, r)
@@ -2039,10 +2005,20 @@ def _relocPS(
         if par.verbose:
             print('    Saving raypaths')
         filename = 'raypaths'
-        key = 'P_ev_{0:d}'.format(int(1.e-6 + evID[ne]))
-        grid_p.to_vtk({key: raysp}, filename)
-        key = 'S_ev_{0:d}'.format(int(1.e-6 + evID[ne]))
-        grid_s.to_vtk({key: rayss}, filename)
+        if nstp > 0:
+            for i in range(nstp):
+                hypp[i, :] = hyp0[indh, :]
+            _, raysp = grid_p.raytrace(hypp, stnp, s_p, thread_no,
+                                       return_rays=True)
+            key = 'P_ev_{0:d}'.format(int(1.e-6 + evID[ne]))
+            grid_p.to_vtk({key: raysp}, filename)
+        if nsts > 0:
+            for i in range(nsts):
+                hyps[i, :] = hyp0[indh, :]
+            _, rayss = grid_s.raytrace(hyps, stns, s_s, thread_no,
+                                       return_rays=True)
+            key = 'S_ev_{0:d}'.format(int(1.e-6 + evID[ne]))
+            grid_s.to_vtk({key: rayss}, filename)
 
     return hyp0[indh, :], indh
 
