@@ -13,11 +13,66 @@ See the tutorials for some examples.  There is also a notebook about the theory.
 
 ## Requirements
 
-Development is made with python version 3.6
+Python 3.11 or later, with numpy, scipy and matplotlib, and
 
-You need to compile the python wrapper for the C++ raytracing code in https://github.com/groupeLIAMG/ttcr and add it to your PYTHONPATH to be able to run hypo.py
+```
+pip install ttcrpy
+```
 
-If you have VTK compiled with python on your system, it is possible to save velocity models and raypaths for posterior visualization (e.g. in paraview).
+for the raytracing.  Version 1.5.2 or later is needed: earlier ones refuse to
+compute the sensitivity matrix for the fast sweeping method, and hand a worker
+process a grid whose slowness has not survived being pickled, which the
+tutorials rely on.  Building from https://github.com/groupeLIAMG/ttcr works
+too, if you want something newer than the release.
+
+If VTK is installed, `save_V` and `save_rp` write velocity models and raypaths
+for later viewing, in paraview say.  Without it the two options warn and write
+nothing, rather than failing.
+
+### Running on the GPU
+
+`ttcrpy` can run the fast sweeping method through OpenCL, which the tutorials
+ask for:
+
+```python
+g = Grid3d(x, y, z, nthreads, cell_slowness=True, method='FSM',
+           dtype=np.float32, fsm_gpu=True)
+```
+
+`dtype=np.float32` is not incidental.  A device that does not advertise
+`cl_khr_fp64` -- which includes every Apple GPU -- refuses a double precision
+grid, so asking for `np.float64` quietly gives you the CPU instead.  Ask
+`g.is_using_gpu` if you want to know which one you got: a refusal falls back
+and still returns correct results, so the answer is otherwise invisible.
+
+Keep sources at least one cell away from the edges of the model.  The FSM and
+DSPM rebuild raypaths by descending the traveltime gradient, and one that
+reaches a face of the grid before it reaches the source has no step left and
+raises.
+
+## Tests
+
+```
+python -m unittest discover -s tests -t .
+```
+
+from the root of the repository; `-t .` is what lets the tests import `hypo`.
+
+## Residuals returned by the joint inversions
+
+`jointHypoVel` and `jointHypoVelPS` return three residual arrays, not two:
+
+```python
+h, V, sc, res = hypo.jointHypoVel(...)
+resV, resAxb, resLoc = res      # velocity, system, hypocenter
+```
+
+`res` is still a tuple, so indexing and `len` behave as before, but code
+written against the older two-element form needs the third name.  `resLoc` has
+shape `(maxit, nev, maxit_hypo)` and holds the traveltime misfit of each event
+at each iteration of its relocation, the counterpart of what `hypoloc`
+returns; entries are zero where an iteration was not reached, so mask them
+with `> 0`.
 
 ## References
 
