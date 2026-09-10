@@ -4,9 +4,9 @@ HYPOcenter location from arrival time data in PYthon.
 
 There are currently 4 hypocenter location functions in this module
 
-hypoloc : Locate hypocenters for constant velocity model
+hypoloc : Locate hypocenters for constant homogeneous velocity model
 hypolocPS : Locate hypocenters from P- and S-wave arrival time data for
-            constant velocity models
+            constant homogeneous velocity models
 jointHypoVel : Joint hypocenter-velocity inversion on a regular grid (cubic
                cells)
 jointHypoVelPS : Joint hypocenter-velocity inversion of P- and S-wave arrival
@@ -61,7 +61,7 @@ previous entries by name, ``resV, resAxb = res``, has to take three now.
 
 def hypoloc(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
     """
-    Locate hypocenters for constant velocity model.
+    Locate hypocenters for constant homogeneous velocity model.
 
     Parameters
     ----------
@@ -185,7 +185,7 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
 
 def hypolocPS(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
     """
-    Locate hypocenters for constant velocity model
+    Locate hypocenters for constant homogeneous velocity model, P- and S-wave data
 
     Parameters
     ----------
