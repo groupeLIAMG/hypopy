@@ -10,3 +10,4 @@ __pycache__/
 *.vtr
 
 .idea/
+.DS_Store
