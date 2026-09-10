@@ -18,6 +18,7 @@ Created on Wed Nov  2 10:29:32 2016
 
 @author: giroux
 """
+import copy
 import sys
 from collections import namedtuple
 from multiprocessing import Process, Queue
@@ -1109,9 +1110,12 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
     """
 
     if grid.n_threads > 1:
-        # we need a second instance for parallel computations
-        grid_s = Grid3d(grid.x, grid.y, grid.z, grid.n_threads,
-                        cell_slowness=True)
+        # A second instance for parallel computations.  Copy the grid we were
+        # given rather than build one from its coordinates: the constructor
+        # defaults would silently pick double precision and no GPU, so a
+        # single-precision grid raytracing P waves on the device would have
+        # been paired with an S-wave grid running double on the CPU.
+        grid_s = copy.deepcopy(grid)
     else:
         grid_s = grid
 
