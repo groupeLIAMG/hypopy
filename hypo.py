@@ -78,6 +78,44 @@ previous entries by name, ``resV, resAxb = res``, has to take three now.
 # %% hypoloc
 
 
+def _gauss_newton_step(H, r, use_lstsq):
+    """One Gauss-Newton step, falling back to a regularised pseudo-inverse.
+
+    The six places that update a hypocenter all solved for the step the same
+    way and then, if the answer was unusable, retried through an SVD of
+    H'H + 1e-9 I.  They disagreed on what "unusable" meant -- hypoloc looked
+    for a non-finite step and let a raised LinAlgError escape, hypolocPS
+    caught the exception and accepted a non-finite step -- so each had a
+    degenerate case the other handled.  Both are covered here.
+
+    use_lstsq selects the route to the step, and is not cosmetic: hypoloc and
+    hypolocPS solve the normal equations while the relocations use a QR least
+    squares, which differ once H is ill conditioned.  Keeping the two apart
+    leaves every caller answering exactly as it did.
+
+    Returns the step, or None when neither route gives a finite one, which
+    leaves the caller to decide what abandoning the event means for it.
+    """
+    # No solver rescues a Jacobian that is already not finite, and the two
+    # routes disagree about how they refuse it -- np.linalg.solve returns NaN
+    # and lstsq raises ValueError -- so the question is settled here instead.
+    if not (np.all(np.isfinite(H)) and np.all(np.isfinite(r))):
+        return None
+    HtH = H.T.dot(H)
+    Htr = H.T.dot(r)
+    try:
+        dh = lstsq(H, r)[0] if use_lstsq else np.linalg.solve(HtH, Htr)
+        if np.all(np.isfinite(dh)):
+            return dh
+    except np.linalg.LinAlgError:
+        pass
+    try:
+        U, S, VVh = np.linalg.svd(HtH + 1e-9 * np.eye(HtH.shape[0]))
+        return np.dot(VVh.T, np.dot(U.T, Htr) / S)
+    except np.linalg.LinAlgError:
+        return None
+
+
 def hypoloc(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
     """
     Locate hypocenters for constant homogeneous velocity model.
@@ -155,19 +193,14 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
             H[:, 3] = -1.0 / V * dz / ds
 
             # dh,residuals,rank, s = np.linalg.H.T.dot((H, r)
-            dh = np.linalg.solve(H.T.dot(H), H.T.dot(r))
-            if not np.all(np.isfinite(dh)):
-                try:
-                    U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(4))
-                    VV = VVh.T
-                    dh = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-                except np.linalg.LinAlgError:
-                    print(
-                        '  Event could not be relocated (iteration no ' +
-                        str(it) +
-                        '), skipping')
-                    sys.stdout.flush()
-                    break
+            dh = _gauss_newton_step(H, r, use_lstsq=False)
+            if dh is None:
+                print(
+                    '  Event could not be relocated (iteration no ' +
+                    str(it) +
+                    '), skipping')
+                sys.stdout.flush()
+                break
 
             loc[inh, 1:] += dh
 
@@ -302,20 +335,14 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
             H[:, 3] = -1.0 / vel * dz / ds
 
             # dh,residuals,rank, s = lsqsq(H, r)
-            try:
-                dh = np.linalg.solve(H.T.dot(H), H.T.dot(r))
-            except np.linalg.LinAlgError:
-                try:
-                    U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(4))
-                    VV = VVh.T
-                    dh = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-                except np.linalg.LinAlgError:
-                    print(
-                        '  Event could not be relocated (iteration no ' +
-                        str(it) +
-                        '), skipping')
-                    sys.stdout.flush()
-                    break
+            dh = _gauss_newton_step(H, r, use_lstsq=False)
+            if dh is None:
+                print(
+                    '  Event could not be relocated (iteration no ' +
+                    str(it) +
+                    '), skipping')
+                sys.stdout.flush()
+                break
 
             loc[inh, 1:] += dh
 
@@ -825,39 +852,9 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                                          tobs)
                     resLoc[it, ne, :] = r_loc
             else:
-                # run in parallel
-                blk_size = np.zeros((grid.n_threads,), dtype=np.int64)
-                nj = nev
-                while nj > 0:
-                    for n in range(grid.n_threads):
-                        blk_size[n] += 1
-                        nj -= 1
-                        if nj == 0:
-                            break
-                processes = []
-                blk_start = 0
-                h_queue = Queue()
-                for n in range(grid.n_threads):
-                    blk_end = blk_start + blk_size[n]
-                    p = Process(
-                        target=_rl_worker,
-                        args=(
-                            n,
-                            blk_start,
-                            blk_end,
-                            par,
-                            grid,
-                            evID,
-                            hyp0,
-                            data,
-                            rcv,
-                            tobs,
-                            h_queue),
-                        daemon=True)
-                    processes.append(p)
-                    p.start()
-                    blk_start += blk_size[n]
-
+                processes, h_queue = _spawn_relocations(
+                    grid.n_threads, nev, _reloc,
+                    (par, grid, evID, hyp0, data, rcv, tobs))
                 _collect_relocations(processes, h_queue, nev, hyp0,
                                      resLoc, it)
 
@@ -937,23 +934,46 @@ def _collect_relocations(processes, h_queue, nev, hyp0, resLoc, it):
         p.join()
 
 
-def _rl_worker(
-        thread_no,
-        istart,
-        iend,
-        par,
-        grid,
-        evID,
-        hyp0,
-        data,
-        rcv,
-        tobs,
-        h_queue):
+def _rl_worker(thread_no, istart, iend, reloc, args, h_queue):
+    """Relocate events istart..iend and send each result back.
+
+    reloc is _reloc or _relocPS and args whatever that one needs after the
+    event number; both are sent to the child by pickle, so both must be
+    importable at module level, which they are.
+
+    ne travels with the result because the parent cannot infer it: it knows
+    indh, the row of hyp0 the event occupies, and the two coincide only when
+    the events happen to be in order.
+    """
     for ne in range(istart, iend):
-        h, indh, res = _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs,
-                              thread_no)
+        h, indh, res = reloc(ne, *args, thread_no)
         h_queue.put((h, indh, ne, res))
     h_queue.close()
+
+
+def _spawn_relocations(n_threads, nev, reloc, args):
+    """Split nev events over n_threads workers, start them, and hand back the
+    processes and the queue they answer on."""
+    blk_size = np.zeros((n_threads,), dtype=np.int64)
+    nj = nev
+    while nj > 0:
+        for n in range(n_threads):
+            blk_size[n] += 1
+            nj -= 1
+            if nj == 0:
+                break
+    processes = []
+    blk_start = 0
+    h_queue = Queue()
+    for n in range(n_threads):
+        blk_end = blk_start + blk_size[n]
+        p = Process(target=_rl_worker,
+                    args=(n, blk_start, blk_end, reloc, args, h_queue),
+                    daemon=True)
+        processes.append(p)
+        p.start()
+        blk_start += blk_size[n]
+    return processes, h_queue
 
 
 def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
@@ -992,19 +1012,12 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
                                       thread_no=thread_no)
 
             r = tobs[indr] - tcalc
-            x = lstsq(H, r)
-            deltah = x[0]
-
-            if np.sum(np.isfinite(deltah)) != deltah.size:
-                try:
-                    U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(2))
-                    VV = VVh.T
-                    deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-                except np.linalg.LinAlgError:
-                    print(' - Event could not be relocated, '
-                          'resetting and exiting')
-                    hyp0[indh, :] = hyp_save
-                    return hyp_save, indh, res
+            deltah = _gauss_newton_step(H, r, use_lstsq=True)
+            if deltah is None:
+                print(' - Event could not be relocated, '
+                      'resetting and exiting')
+                hyp0[indh, :] = hyp_save
+                return hyp_save, indh, res
 
             for n in range(2):
                 if np.abs(deltah[n]) > par.dx_max:
@@ -1046,18 +1059,11 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
 
         r = tobs[indr] - tcalc
         res[itt] = np.linalg.norm(r)
-        x = lstsq(H, r)
-        deltah = x[0]
-
-        if np.sum(np.isfinite(deltah)) != deltah.size:
-            try:
-                U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(4))
-                VV = VVh.T
-                deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-            except np.linalg.LinAlgError:
-                print('  Event could not be relocated, resetting and exiting')
-                hyp0[indh, :] = hyp_save
-                return hyp_save, indh, res
+        deltah = _gauss_newton_step(H, r, use_lstsq=True)
+        if deltah is None:
+            print('  Event could not be relocated, resetting and exiting')
+            hyp0[indh, :] = hyp_save
+            return hyp_save, indh, res
 
         if np.abs(deltah[0]) > par.dt_max:
             deltah[0] = par.dt_max * np.sign(deltah[0])
@@ -1802,44 +1808,10 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                                            (s_p, s_s), (indp, inds))
                     resLoc[it, ne, :] = r_loc
             else:
-                # run in parallel
-                blk_size = np.zeros((grid.n_threads,), dtype=np.int64)
-                nj = nev
-                while nj > 0:
-                    for n in range(grid.n_threads):
-                        blk_size[n] += 1
-                        nj -= 1
-                        if nj == 0:
-                            break
-                processes = []
-                blk_start = 0
-                h_queue = Queue()
-                for n in range(grid.n_threads):
-                    blk_end = blk_start + blk_size[n]
-                    p = Process(
-                        target=_rlPS_worker,
-                        args=(
-                            n,
-                            blk_start,
-                            blk_end,
-                            par,
-                            (grid,
-                             grid_s),
-                            evID,
-                            hyp0,
-                            data,
-                            rcv,
-                            tobs,
-                            (s_p,
-                             s_s),
-                            (indp,
-                             inds),
-                            h_queue),
-                        daemon=True)
-                    processes.append(p)
-                    p.start()
-                    blk_start += blk_size[n]
-
+                processes, h_queue = _spawn_relocations(
+                    grid.n_threads, nev, _relocPS,
+                    (par, (grid, grid_s), evID, hyp0, data, rcv, tobs,
+                     (s_p, s_s), (indp, inds)))
                 _collect_relocations(processes, h_queue, nev, hyp0,
                                      resLoc, it)
 
@@ -1903,25 +1875,6 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
     return hyp0, (Vp, Vs), (sc_p, sc_s), Residuals(resV, resAxb, resLoc)
 
 
-def _rlPS_worker(
-        thread_no,
-        istart,
-        iend,
-        par,
-        grid,
-        evID,
-        hyp0,
-        data,
-        rcv,
-        tobs,
-        s,
-        ind,
-        h_queue):
-    for ne in range(istart, iend):
-        h, indh, res = _relocPS(ne, par, grid, evID, hyp0, data,
-                                rcv, tobs, s, ind, thread_no)
-        h_queue.put((h, indh, ne, res))
-    h_queue.close()
 
 
 def _relocPS(
@@ -2008,19 +1961,12 @@ def _relocPS(
 
             r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
 
-            x = lstsq(H, r)
-            deltah = x[0]
-
-            if np.sum(np.isfinite(deltah)) != deltah.size:
-                try:
-                    U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(2))
-                    VV = VVh.T
-                    deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-                except np.linalg.LinAlgError:
-                    print(' - Event could not be relocated, '
-                          'resetting and exiting')
-                    hyp0[indh, :] = hyp_save
-                    return hyp_save, indh, res
+            deltah = _gauss_newton_step(H, r, use_lstsq=True)
+            if deltah is None:
+                print(' - Event could not be relocated, '
+                      'resetting and exiting')
+                hyp0[indh, :] = hyp_save
+                return hyp_save, indh, res
 
             for n in range(2):
                 if np.abs(deltah[n]) > par.dx_max:
@@ -2074,18 +2020,11 @@ def _relocPS(
 
         r = np.hstack((tobs[indrp] - tcalcp, tobs[indrs] - tcalcs))
         res[itt] = np.linalg.norm(r)
-        x = lstsq(H, r)
-        deltah = x[0]
-
-        if np.sum(np.isfinite(deltah)) != deltah.size:
-            try:
-                U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(4))
-                VV = VVh.T
-                deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-            except np.linalg.LinAlgError:
-                print('  Event could not be relocated, resetting and exiting')
-                hyp0[indh, :] = hyp_save
-                return hyp_save, indh, res
+        deltah = _gauss_newton_step(H, r, use_lstsq=True)
+        if deltah is None:
+            print('  Event could not be relocated, resetting and exiting')
+            hyp0[indh, :] = hyp_save
+            return hyp_save, indh, res
 
         if np.abs(deltah[0]) > par.dt_max:
             deltah[0] = par.dt_max * np.sign(deltah[0])
