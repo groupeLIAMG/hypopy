@@ -19,7 +19,9 @@ Created on Wed Nov  2 10:29:32 2016
 @author: giroux
 """
 import copy
+import queue
 import sys
+import warnings
 from collections import namedtuple
 from multiprocessing import Process, Queue
 
@@ -30,6 +32,23 @@ from scipy.linalg import lstsq
 import matplotlib.pyplot as plt
 
 from ttcrpy.rgrid import Grid3d
+
+try:
+    import vtk as _vtk
+except ImportError:                                  # pragma: no cover
+    _vtk = None
+
+# save_V and save_rp write through ttcrpy's to_vtk, which needs VTK.  This used
+# to be spelt "'vtk' in sys.modules", which asks whether somebody else happened
+# to import it first: run the same inversion from a script that does not and
+# the files were silently never written.
+HAS_VTK = _vtk is not None
+
+
+def _warn_no_vtk(option):
+    warnings.warn('{0} was requested but VTK is not installed, so nothing '
+                  'will be written'.format(option), RuntimeWarning,
+                  stacklevel=3)
 
 
 Residuals = namedtuple('Residuals', ['velocity', 'system', 'hypocenter'])
@@ -142,7 +161,7 @@ def hypoloc(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
                     U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(4))
                     VV = VVh.T
                     dh = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-                except np.linalg.linalg.LinAlgError:
+                except np.linalg.LinAlgError:
                     print(
                         '  Event could not be relocated (iteration no ' +
                         str(it) +
@@ -285,12 +304,12 @@ def hypolocPS(data, rcv, V, hinit, maxit, convh, tol=1e-6, verbose=False):
             # dh,residuals,rank, s = lsqsq(H, r)
             try:
                 dh = np.linalg.solve(H.T.dot(H), H.T.dot(r))
-            except np.linalg.linalg.LinAlgError:
+            except np.linalg.LinAlgError:
                 try:
                     U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(4))
                     VV = VVh.T
                     dh = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-                except np.linalg.linalg.LinAlgError:
+                except np.linalg.LinAlgError:
                     print(
                         '  Event could not be relocated (iteration no ' +
                         str(it) +
@@ -368,7 +387,7 @@ class InvParams():
                         Step 2: all 4 parameters allowed to vary
         use_sc      : Use static corrections
         constr_sc   : Constrain sum of P-wave static corrections to zero
-        show_plots  : show various plots during inversion (True by default)
+        show_plots  : show various plots during inversion (False by default)
         save_V      : save intermediate velocity models (False by default)
                         save in vtk format if VTK module can be found
         save_rp     : save ray paths (False by default)
@@ -788,7 +807,9 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             if par.save_V:
                 if par.verbose:
                     print('  Saving Velocity model')
-                if 'vtk' in sys.modules:
+                if not HAS_VTK:
+                    _warn_no_vtk('save_V')
+                if HAS_VTK:
                     grid.to_vtk({'Vp': V}, 'Vp{0:02d}'.format(it + 1))
 
             grid.set_slowness(s)
@@ -837,10 +858,8 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                     p.start()
                     blk_start += blk_size[n]
 
-                for ne in range(nev):
-                    h, indh, ne_done, r_loc = h_queue.get()
-                    hyp0[indh, :] = h
-                    resLoc[it, ne_done, :] = r_loc
+                _collect_relocations(processes, h_queue, nev, hyp0,
+                                     resLoc, it)
 
     if par.invert_vel:
         if nev > 0:
@@ -881,6 +900,41 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
         print('\n ** Inversion complete **\n', flush=True)
 
     return hyp0, V, sc, Residuals(resV, resAxb, resLoc)
+
+
+def _collect_relocations(processes, h_queue, nev, hyp0, resLoc, it):
+    """Take nev results off the queue, and notice if a worker dies first.
+
+    Waiting on the queue without a timeout is only safe while the workers are
+    alive to fill it.  A worker that raises -- reaching a raypath that leaves
+    the grid, say -- prints its traceback and exits, and the parent then waits
+    on a queue nobody will write to, forever, with nothing to say about why.
+    The timeout here is not a deadline on the work: as long as every worker is
+    running the loop simply waits again.  It only decides how soon a death is
+    noticed.
+    """
+    received = 0
+    while received < nev:
+        try:
+            h, indh, ne_done, r_loc = h_queue.get(timeout=5.0)
+        except queue.Empty:
+            dead = [(p.name, p.exitcode) for p in processes
+                    if p.exitcode is not None and p.exitcode != 0]
+            if dead or not any(p.is_alive() for p in processes):
+                for p in processes:
+                    if p.is_alive():
+                        p.terminate()
+                raise RuntimeError(
+                    'relocation stopped after {0:d} of {1:d} events: worker '
+                    '(name, exit code) {2} ended without returning results; '
+                    'its traceback is above'.format(received, nev,
+                                                    dead or 'unknown'))
+            continue
+        hyp0[indh, :] = h
+        resLoc[it, ne_done, :] = r_loc
+        received += 1
+    for p in processes:
+        p.join()
 
 
 def _rl_worker(
@@ -946,7 +1000,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
                     U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(2))
                     VV = VVh.T
                     deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-                except np.linalg.linalg.LinAlgError:
+                except np.linalg.LinAlgError:
                     print(' - Event could not be relocated, '
                           'resetting and exiting')
                     hyp0[indh, :] = hyp_save
@@ -1000,7 +1054,7 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
                 U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(4))
                 VV = VVh.T
                 deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-            except np.linalg.linalg.LinAlgError:
+            except np.linalg.LinAlgError:
                 print('  Event could not be relocated, resetting and exiting')
                 hyp0[indh, :] = hyp_save
                 return hyp_save, indh, res
@@ -1034,7 +1088,9 @@ def _reloc(ne, par, grid, evID, hyp0, data, rcv, tobs, thread_no=None):
             print(' - reached max number of iterations')
             sys.stdout.flush()
 
-    if par.save_rp and 'vtk' in sys.modules and par._final_iteration:
+    if par.save_rp and par._final_iteration and not HAS_VTK:
+        _warn_no_vtk('save_rp')
+    if par.save_rp and HAS_VTK and par._final_iteration:
         if par.verbose:
             print('    Saving raypaths')
         for i in range(nst):
@@ -1725,13 +1781,13 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             if par.save_V:
                 if par.verbose:
                     print('  Saving Velocity models')
-                if 'vtk' in sys.modules:
+                if not HAS_VTK:
+                    _warn_no_vtk('save_V')
+                else:
                     grid.to_vtk({'Vp': Vp}, 'Vp{0:02d}'.format(it + 1))
-                if par.invert_VsVp:
-                    if 'vtk' in sys.modules:
+                    if par.invert_VsVp:
                         grid.to_vtk({'VsVp': SsSp},
                                     'VsVp{0:02d}'.format(it + 1))
-                if 'vtk' in sys.modules:
                     grid.to_vtk({'Vs': Vs}, 'Vs{0:02d}'.format(it + 1))
 
         if nev > 0:
@@ -1784,10 +1840,8 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                     p.start()
                     blk_start += blk_size[n]
 
-                for ne in range(nev):
-                    h, indh, ne_done, r_loc = h_queue.get()
-                    hyp0[indh, :] = h
-                    resLoc[it, ne_done, :] = r_loc
+                _collect_relocations(processes, h_queue, nev, hyp0,
+                                     resLoc, it)
 
     if par.invert_vel:
         if nev > 0:
@@ -1962,7 +2016,7 @@ def _relocPS(
                     U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(2))
                     VV = VVh.T
                     deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-                except np.linalg.linalg.LinAlgError:
+                except np.linalg.LinAlgError:
                     print(' - Event could not be relocated, '
                           'resetting and exiting')
                     hyp0[indh, :] = hyp_save
@@ -2028,7 +2082,7 @@ def _relocPS(
                 U, S, VVh = np.linalg.svd(H.T.dot(H) + 1e-9 * np.eye(4))
                 VV = VVh.T
                 deltah = np.dot(VV, np.dot(U.T, H.T.dot(r)) / S)
-            except np.linalg.linalg.LinAlgError:
+            except np.linalg.LinAlgError:
                 print('  Event could not be relocated, resetting and exiting')
                 hyp0[indh, :] = hyp_save
                 return hyp_save, indh, res
@@ -2060,7 +2114,9 @@ def _relocPS(
             print(' - reached max number of iterations')
             sys.stdout.flush()
 
-    if par.save_rp and 'vtk' in sys.modules and par._final_iteration:
+    if par.save_rp and par._final_iteration and not HAS_VTK:
+        _warn_no_vtk('save_rp')
+    if par.save_rp and HAS_VTK and par._final_iteration:
         if par.verbose:
             print('    Saving raypaths')
         filename = 'raypaths'
