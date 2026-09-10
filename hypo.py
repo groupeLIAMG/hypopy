@@ -391,7 +391,12 @@ class InvParams():
         Parameters
         ----------
         maxit       : max number of iterations
-        maxit_hypo  :
+        maxit_hypo  : max number of iterations of the relocation of one event,
+                        within one iteration of the joint inversion.  Each
+                        stage stops early once the update falls below
+                        conv_hypo; with hypo_2step the cap applies to each of
+                        the two stages.  It also sets the last axis of the
+                        relocation residuals returned in Residuals.hypocenter
         conv_hypo   : convergence criterion (units of distance)
         Vlim        : tuple holding (Vpmin, Vpmax, PAp, Vsmin, Vsmax, PAs) for
                         velocity penalties

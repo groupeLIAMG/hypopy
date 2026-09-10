@@ -11,7 +11,10 @@ worth protecting -- that relocating in parallel gives the same answer as
 relocating serially, and that a worker dying is reported rather than waited
 on -- cannot be checked any other way.
 """
+import ast
+import inspect
 import multiprocessing as mp
+import re
 import unittest
 import warnings
 
@@ -283,6 +286,46 @@ class TestVtkReporting(unittest.TestCase):
         self.assertEqual(len(w), 1)
         self.assertIs(w[0].category, RuntimeWarning)
         self.assertIn('save_V', str(w[0].message))
+
+
+class TestDocstrings(unittest.TestCase):
+    """Every parameter is named in the docstring, and says something.
+
+    maxit_hypo was listed with nothing after the colon, which a check for the
+    name alone counts as documented -- so the check looks at the description
+    too.
+    """
+
+    def _entries(self):
+        tree = ast.parse(inspect.getsource(hypo))
+        for n in tree.body:
+            if isinstance(n, ast.FunctionDef) and not n.name.startswith('_'):
+                yield n.name, [a.arg for a in n.args.args], ast.get_docstring(n)
+            elif isinstance(n, ast.ClassDef):
+                init = next((f for f in n.body
+                             if isinstance(f, ast.FunctionDef)
+                             and f.name == '__init__'), None)
+                if init is not None:
+                    yield (n.name, [a.arg for a in init.args.args][1:],
+                           ast.get_docstring(init))
+
+    def test_every_parameter_is_described(self):
+        for name, args, doc in self._entries():
+            lines = (doc or '').splitlines()
+            for a in args:
+                with self.subTest(where=name, param=a):
+                    pat = re.compile(r'^\s*%s\s*:(.*)$' % re.escape(a))
+                    hit = next(((i, m.group(1).strip())
+                                for i, l in enumerate(lines)
+                                for m in [pat.match(l)] if m), None)
+                    self.assertIsNotNone(hit, '%s: %s is not documented'
+                                         % (name, a))
+                    i, tail = hit
+                    if not tail:
+                        nxt = lines[i+1].strip() if i + 1 < len(lines) else ''
+                        self.assertTrue(
+                            nxt and not re.match(r'^\w+\s*:', nxt),
+                            '%s: %s is listed with no description' % (name, a))
 
 
 if __name__ == '__main__':
