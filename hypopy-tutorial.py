@@ -24,11 +24,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set_style("whitegrid")
 
-import sys
-sys.path.append('/Users/giroux/src/ttcr/src')
-
 import hypo
-from ttcrpy.rgrid import Grid3d
+
+try:
+    from ttcrpy.rgrid import Grid3d
+except ImportError as e:
+    raise ImportError('ttcrpy is required to run this tutorial; '
+                      'see README Requirements') from e
 
 
 # jointHypoVel relocates events with multiprocessing.Process.  macOS starts
