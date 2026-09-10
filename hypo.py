@@ -111,7 +111,8 @@ def _gauss_newton_step(H, r, use_lstsq):
         pass
     try:
         U, S, VVh = np.linalg.svd(HtH + 1e-9 * np.eye(HtH.shape[0]))
-        return np.dot(VVh.T, np.dot(U.T, Htr) / S)
+        dh = np.dot(VVh.T, np.dot(U.T, Htr) / S)
+        return dh if np.all(np.isfinite(dh)) else None
     except np.linalg.LinAlgError:
         return None
 
