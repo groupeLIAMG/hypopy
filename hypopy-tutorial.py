@@ -2,9 +2,9 @@
 # coding: utf-8
 
 # # hypopy tutorial, P-wave arrivals only
-# 
+#
 # ## Outline
-# 
+#
 # - [Create synthetic data](#Create-synthetic-data)
 # - [Initial hypocenter locations](#Initial-hypocenter-locations)
 # - [Velocity data points](#Velocity-data-points)
@@ -13,7 +13,7 @@
 # - [Joint hypocenter-velocity inversion parameters](#Joint-hypocenter-velocity-inversion-parameters)
 # - [Joint hypocenter-velocity inversion](#Joint-hypocenter-velocity-inversion)
 # - [Results](#Results)
-# 
+#
 
 # In[1]:
 
@@ -23,6 +23,10 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 import seaborn as sns
 sns.set_style("whitegrid")
+
+import sys
+sys.path.append('/Users/giroux/src/ttcr/src')
+
 import hypo
 from ttcrpy.rgrid import Grid3d
 
@@ -34,7 +38,7 @@ from ttcrpy.rgrid import Grid3d
 # the result queue.  (The notebook is unaffected: there __main__ is ipykernel.)
 if __name__ == '__main__':
     # ## Create first synthetic data
-    # 
+    #
     # Define limits and build grid
 
     # In[6]:
@@ -50,19 +54,18 @@ if __name__ == '__main__':
     dx = 0.005   # grid cell size, we use cubic cells here
 
     # coordinates of the nodes
-    x = np.arange(xmin, xmax, dx)
-    y = np.arange(ymin, ymax, dx)
-    z = np.arange(zmin, zmax, dx)
+    x = np.arange(xmin, xmax, dx, dtype=np.float32)
+    y = np.arange(ymin, ymax, dx, dtype=np.float32)
+    z = np.arange(zmin, zmax, dx, dtype=np.float32)
 
     # coordinates of the center of the voxels
-    xx = np.arange(xmin+dx/2, xmax, dx)
-    yy = np.arange(ymin+dx/2, ymax, dx)
-    zz = np.arange(zmin+dx/2, zmax, dx)
+    xx = np.arange(xmin+dx/2, xmax, dx, dtype=np.float32)
+    yy = np.arange(ymin+dx/2, ymax, dx, dtype=np.float32)
+    zz = np.arange(zmin+dx/2, zmax, dx, dtype=np.float32)
 
     nthreads = 4   # do calculations in parallel with 4 processes
-    #nthreads = 1   # there is currently an issue with relocating events in parallel
 
-    g = Grid3d(x, y, z, nthreads, cell_slowness=True, method='SPM')
+    g = Grid3d(x, y, z, nthreads, cell_slowness=True, method='FSM', dtype=np.float32, fsm_gpu=True)
 
 
     # We need some receivers
@@ -82,8 +85,8 @@ if __name__ == '__main__':
                     [0.155, 0.192, 0.009],
                     [0.198, 0.198, 0.010],
                     [0.198, 0.196, 0.040],
-                    [0.198, 0.193, 0.090]])
-    ircv = np.arange(rcv.shape[0]).reshape(-1, 1)   # vector of rcv indices
+                    [0.198, 0.193, 0.090]], dtype=np.float32)
+    ircv = np.arange(rcv.shape[0], dtype=int).reshape(-1, 1)   # vector of rcv indices
     nsta = rcv.shape[0]
 
 
@@ -97,7 +100,7 @@ if __name__ == '__main__':
                      np.linspace(0., 50., nev) + np.random.randn(nev),          # origin time
                      0.160 + 0.005*np.random.randn(nev),                        # x
                      0.140 + 0.005*np.random.randn(nev),                        # y
-                     0.060 + 0.010*np.random.randn(nev))).T                     # z
+                     np.clip(0.055 + 0.007*np.random.randn(nev), 0.020, 0.080)), dtype=np.float32).T   # z, kept clear of the boundary
 
     h_true = src.copy()
 
@@ -126,7 +129,7 @@ if __name__ == '__main__':
     def Vz(z):
         return 4.0 + 10. * (z - 0.050)
 
-    Vp = np.kron(Vz(zz), np.ones((g.shape[0], g.shape[1], 1)))
+    Vp = np.kron(Vz(zz), np.ones((g.shape[0], g.shape[1], 1), dtype=np.float32))
 
     plt.figure(figsize=(10, 8))
     plt.subplot(221)
@@ -149,12 +152,12 @@ if __name__ == '__main__':
 
 
     # Let's now compute the travel times
-    # 
+    #
     # The raytracing routine takes 3 input variables:
     # - the matrix of hypocenter data (hypo)
     # - the matrix of receiver coordonates (rcv)
     # - the slowness vector (ordered in 'C' order)
-    # 
+    #
     # hypo and rcv must have the same number of rows, with each row corresponding to a source-receiver pair
 
     # In[7]:
@@ -162,9 +165,9 @@ if __name__ == '__main__':
 
     slowness = 1./Vp.flatten()
 
-    src = np.kron(src, np.ones((nsta, 1)))   # use kron to replicate src-rcv pairs correctly
-    rcv_data = np.kron(np.ones((nev, 1)), rcv)
-    ircv_data = np.kron(np.ones((nev, 1)), ircv)
+    src = np.kron(src, np.ones((nsta, 1), dtype=np.float32))   # use kron to replicate src-rcv pairs correctly
+    rcv_data = np.kron(np.ones((nev, 1), dtype=np.float32), rcv)
+    ircv_data = np.kron(np.ones((nev, 1), dtype=int), ircv)
 
     print(src.shape)
     print(rcv_data.shape)
@@ -177,6 +180,7 @@ if __name__ == '__main__':
 
     tt = g.raytrace(src, rcv_data, slowness)
 
+    plt.figure()
     plt.plot(tt,'o')
     plt.xlabel('Data number')
     plt.ylabel('Traveltime')
@@ -201,10 +205,10 @@ if __name__ == '__main__':
 
 
     # ## Initial hypocenter locations
-    # 
+    #
     # Note that for efficiency reason when computing matrix M, initial hypocenters
-    # should _not_ be equal for any two event, e.g. they shoud all be different.
-    # 
+    # should _not_ be equal for any two event, e.g. they should all be different.
+    #
     # Here we place the initial coordinates more or less in the center of the grid.
 
     # In[11]:
@@ -218,7 +222,7 @@ if __name__ == '__main__':
 
 
     # ## Velocity data points
-    # 
+    #
     # For illustrative purposes, let's add a couple of velocity data points to constrain the inversion
 
     # In[12]:
@@ -235,7 +239,7 @@ if __name__ == '__main__':
 
 
     # ## Calibration shots
-    # 
+    #
     # Let's use 5 shots recorded at most receivers
 
     # In[13]:
@@ -265,9 +269,9 @@ if __name__ == '__main__':
 
 
     # ## Constant velocity inversion
-    # 
+    #
     # Before running the joint hypocenter-velocity inversion (JHVI), we use the constant velocity location algorithm.  This will improve convergence of the JHVI.
-    # 
+    #
     # Initial velocity model is of course homogeneous, we take the mean value of the data points.
 
     # In[14]:
@@ -275,18 +279,23 @@ if __name__ == '__main__':
 
     Vinit = np.mean(Vpts[:,0])
 
-    hinit2, res = hypo.hypoloc(data, rcv, V=Vinit, hinit=hinit, maxit=15, convh=0.001, verbose=True)
+    hinit2, res_c = hypo.hypoloc(data, rcv, V=Vinit, hinit=hinit, maxit=15, convh=0.001, verbose=True)
 
 
     # Let's have a look at the residuals
 
     # In[15]:
 
+    print(res_c)
 
-    for n in range(res.shape[0]):
-        ind = res[n, :] > 0
-        plt.semilogy(res[n, ind], 'o', label='event no {}'.format(n))
+    plt.figure()
+    for n in range(res_c.shape[0]):
+        ind = res_c[n, :] > 0
+        plt.semilogy(res_c[n, ind], 'o', label='event no {}'.format(n))
     plt.legend(loc='lower left', bbox_to_anchor=(1.03, 0.0))
+    plt.xlabel('Iteration')
+    plt.ylabel('Residuals')
+    plt.tight_layout()
     plt.show(block=False)
 
 
@@ -315,7 +324,7 @@ if __name__ == '__main__':
 
 
     # ## Joint hypocenter-velocity inversion parameters
-    # 
+    #
     # Define inversion parameters
 
     # In[17]:
@@ -358,25 +367,42 @@ if __name__ == '__main__':
 
 
     # ## Joint hypocenter-velocity inversion
-    # 
+    #
     # Run the inversion
 
     # In[ ]:
 
 
     h, V, sc, res = hypo.jointHypoVel(par, g, data, rcv, Vpinit, hinit2, caldata=caldata, Vpts=Vpts)
-
+    resV, resAxb, resLoc = res
 
     # ## Results
 
     # In[ ]:
 
-
-    for n in range(len(res)):
-        ind = res[n] > 0
-        plt.semilogy(res[n][ind], 'o', label='event no {}'.format(n))
-    plt.legend(loc='lower left', bbox_to_anchor=(1.03, 0.0))
+    # traveltime misfit before each velocity update, and once after the last
+    plt.figure()
+    plt.semilogy(resV, 'o-')
+    plt.xlabel('Iteration')
+    plt.ylabel('Residuals')
+    plt.title('Traveltime residuals of the velocity inversion')
+    plt.tight_layout()
     plt.show(block=False)
+
+    # In[ ]:
+
+    # relocation misfit of each event, as hypoloc reports it, for the last
+    # iteration of the joint inversion
+    plt.figure()
+    for n in range(resLoc.shape[1]):
+        ind = resLoc[-1, n, :] > 0
+        plt.semilogy(resLoc[-1, n, ind], 'o', label='event no {}'.format(n))
+    plt.legend(loc='lower left', bbox_to_anchor=(1.03, 0.0))
+    plt.xlabel('Relocation iteration')
+    plt.ylabel('Residuals')
+    plt.title('Relocation residuals, last iteration')
+    plt.tight_layout()
+    plt.show()
 
 
     # In[ ]:
@@ -438,7 +464,7 @@ if __name__ == '__main__':
 
     # In[ ]:
 
-
+    plt.figure()
     plt.plot(sc,'o')
     plt.xlabel('Station no')
     plt.ylabel('Correction')
@@ -446,7 +472,3 @@ if __name__ == '__main__':
 
 
     # In[ ]:
-
-
-
-
