@@ -1686,7 +1686,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 if nttcals > 0:
                     Ls = Ls_cal[nc]
                 else:
-                    Ls = sp.csr_array([])
+                    Ls = sp.csr_array((0, nslowness))
 
                 if par.invert_VsVp:
                     if nttcals > 0:
