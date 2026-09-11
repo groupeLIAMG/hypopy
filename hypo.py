@@ -561,7 +561,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 tmp = np.zeros((nst, nsta))
                 for n in range(nst):
                     tmp[n, int(1.e-6 + caldata[indr[n], 2])] = 1.0
-                Lsc_cal.append(sp.csr_matrix(tmp))
+                Lsc_cal.append(sp.csr_array(tmp))
     else:
         ncal = 0
         tcal = np.array([])
@@ -586,7 +586,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
         resAxb = np.zeros(par.maxit)
 
         P = np.ones(nslowness)
-        dP = sp.csr_matrix(
+        dP = sp.csr_array(
             (np.ones(nslowness), (np.arange(
                 nslowness, dtype=np.int64), np.arange(
                 nslowness, dtype=np.int64))), shape=(
@@ -605,18 +605,18 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             nn = i.size
             i = np.kron(i, np.ones((nn,)))
             j = np.kron(np.ones((nn,)), j)
-            u1Tu1 = sp.csr_matrix((np.ones((i.size,)), (i, j)),
+            u1Tu1 = sp.csr_array((np.ones((i.size,)), (i, j)),
                                   shape=(nslowness + nsta, nslowness + nsta))
         else:
             u1 = np.zeros(nslowness + nsta)
-            u1Tu1 = sp.csr_matrix((nslowness + nsta, nslowness + nsta))
+            u1Tu1 = sp.csr_array((nslowness + nsta, nslowness + nsta))
 
         if Vpts.size > 0:
             if par.verbose:
                 print('Building velocity data point matrix D')
                 sys.stdout.flush()
             D = grid.compute_D(Vpts[:, 1:])
-            D1 = sp.hstack((D, sp.coo_matrix((Vpts.shape[0], nsta)))).tocsr()
+            D1 = sp.hstack((D, sp.coo_array((Vpts.shape[0], nsta)))).tocsr()
             Spts = 1. / Vpts[:, 0]
         else:
             D = 0.0
@@ -625,12 +625,12 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             print('Building regularization matrix K')
             sys.stdout.flush()
         Kx, Ky, Kz = grid.compute_K()
-        Kx1 = sp.hstack((Kx, sp.coo_matrix((nslowness, nsta)))).tocsr()
-        KtK = Kx1.T * Kx1
-        Ky1 = sp.hstack((Ky, sp.coo_matrix((nslowness, nsta)))).tocsr()
-        KtK += Ky1.T * Ky1
-        Kz1 = sp.hstack((Kz, sp.coo_matrix((nslowness, nsta)))).tocsr()
-        KtK += par.wzK * Kz1.T * Kz1
+        Kx1 = sp.hstack((Kx, sp.coo_array((nslowness, nsta)))).tocsr()
+        KtK = Kx1.T @ Kx1
+        Ky1 = sp.hstack((Ky, sp.coo_array((nslowness, nsta)))).tocsr()
+        KtK += Ky1.T @ Ky1
+        Kz1 = sp.hstack((Kz, sp.coo_array((nslowness, nsta)))).tocsr()
+        KtK += par.wzK * Kz1.T @ Kz1
         nK = spl.norm(KtK)
         Kx = Kx.tocsr()
         Ky = Ky.tocsr()
@@ -654,9 +654,9 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 sys.stdout.flush()
 
             # compute vector C
-            cx = Kx * s
-            cy = Ky * s
-            cz = Kz * s
+            cx = Kx @ s
+            cy = Ky @ s
+            cz = Kz @ s
 
             # compute dP/dV, matrix of penalties derivatives
             for n in np.arange(nslowness):
@@ -743,15 +743,15 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                     H[ns, 3] = -S0 * d[2] / ds
 
                 Q, _ = np.linalg.qr(H, mode='complete')
-                T = sp.csr_matrix(Q[:, 4:]).T
-                L = sp.csr_matrix(Lev[ne], shape=(nst, nslowness))
+                T = sp.csr_array(Q[:, 4:]).T
+                L = sp.csr_array(Lev[ne], shape=(nst, nslowness))
                 if par.use_sc:
                     Lsc = np.zeros((nst, nsta))
                     for ns in range(nst):
                         Lsc[ns, int(1.e-6 + data[indr[ns], 2])] = 1.
-                    L = sp.hstack((L, sp.csr_matrix(Lsc)))
+                    L = sp.hstack((L, sp.csr_array(Lsc)))
 
-                L = T * L
+                L = T @ L
 
                 if L1 is None:
                     L1 = L
@@ -777,7 +777,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             ssc = -np.sum(sc)  # u1.T * deltam
 
             dP1 = sp.hstack(
-                (dP, sp.csr_matrix(
+                (dP, sp.csr_array(
                     np.zeros(
                         (nslowness, nsta))))).tocsr()  # dP prime
 
@@ -785,14 +785,14 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
 
             L1 = L1.tocsr()
 
-            A = L1.T * L1
+            A = L1.T @ L1
             nM = spl.norm(A)
 
             λ = par.λ * nM / nK
 
             A += λ * KtK
 
-            tmp = dP1.T * dP1
+            tmp = dP1.T @ dP1
             nP = spl.norm(tmp)
             if nP != 0.0:
                 γ = par.γ * nM / nP
@@ -802,20 +802,20 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             A += γ * tmp
             A += u1Tu1
 
-            b = L1.T * r1
-            tmp2x = Kx1.T * cx
-            tmp2y = Ky1.T * cy
-            tmp2z = Kz1.T * cz
-            tmp3 = dP1.T * P
+            b = L1.T @ r1
+            tmp2x = Kx1.T @ cx
+            tmp2y = Ky1.T @ cy
+            tmp2z = Kz1.T @ cz
+            tmp3 = dP1.T @ P
             tmp = u1 * ssc
             b += - λ * tmp2x - λ * tmp2y - par.wzK * λ * tmp2z - γ * tmp3 - tmp
 
             if Vpts.shape[0] > 0:
-                tmp = D1.T * D1
+                tmp = D1.T @ D1
                 nD = spl.norm(tmp)
                 α = par.α * nM / nD
                 A += α * tmp
-                b += α * D1.T * (Spts - D * s)
+                b += α * D1.T @ (Spts - D @ s)
 
             if par.verbose:
                 print('    calling minres with system of '
@@ -824,7 +824,7 @@ def jointHypoVel(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             x = spl.minres(A, b)
 
             deltam = x[0]
-            resAxb[it] = np.linalg.norm(A * deltam - b)
+            resAxb[it] = np.linalg.norm(A @ deltam - b)
 
             dmean = np.mean(np.abs(deltam[:nslowness]))
             if dmean > par.dVp_max:
@@ -1291,7 +1291,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
 
                 Lsc_cal.append(
                     sp.block_diag(
-                        (sp.csr_matrix(Lpsc), sp.csr_matrix(Lssc))))
+                        (sp.csr_array(Lpsc), sp.csr_array(Lssc))))
 
     else:
         ncal = 0
@@ -1330,7 +1330,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
         resAxb = np.zeros(par.maxit)
 
         P = np.ones(2 * nslowness)
-        dP = sp.csr_matrix(
+        dP = sp.csr_array(
             (np.ones(
                 2 * nslowness),
                 (np.arange(
@@ -1360,11 +1360,11 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             nn = i.size
             i = np.kron(i, np.ones((nn,)))
             j = np.kron(np.ones((nn,)), j)
-            u1Tu1 = sp.csr_matrix((np.ones((i.size,)), (i, j)), shape=(
+            u1Tu1 = sp.csr_array((np.ones((i.size,)), (i, j)), shape=(
                 2 * nslowness + 2 * nsta, 2 * nslowness + 2 * nsta))
         else:
             u1 = np.zeros(2 * nslowness + 2 * nsta)
-            u1Tu1 = sp.csr_matrix(
+            u1Tu1 = sp.csr_array(
                 (2 * nslowness + 2 * nsta, 2 * nslowness + 2 * nsta))
 
         Vpts2 = Vpts.copy()
@@ -1394,7 +1394,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
 
             if par.invert_VsVp:
                 D = grid.compute_D(Vpts2[:, 1:4])
-                D = sp.hstack((D, sp.coo_matrix(D.shape))).tocsr()
+                D = sp.hstack((D, sp.coo_array(D.shape))).tocsr()
             else:
                 i_p = Vpts2[:, 4] == 0.0
                 i_s = Vpts2[:, 4] == 1.0
@@ -1403,7 +1403,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 D = sp.block_diag((Dp, Ds)).tocsr()
 
             D1 = sp.hstack(
-                (D, sp.csr_matrix(
+                (D, sp.csr_array(
                     (Vpts2.shape[0], 2 * nsta)))).tocsr()
             Spts = 1. / Vpts2[:, 0]
         else:
@@ -1416,12 +1416,12 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
         Kx = sp.block_diag((Kx, Kx))
         Ky = sp.block_diag((Ky, Ky))
         Kz = sp.block_diag((Kz, Kz))
-        Kx1 = sp.hstack((Kx, sp.coo_matrix((2 * nslowness, 2 * nsta)))).tocsr()
-        KtK = Kx1.T * Kx1
-        Ky1 = sp.hstack((Ky, sp.coo_matrix((2 * nslowness, 2 * nsta)))).tocsr()
-        KtK += Ky1.T * Ky1
-        Kz1 = sp.hstack((Kz, sp.coo_matrix((2 * nslowness, 2 * nsta)))).tocsr()
-        KtK += par.wzK * Kz1.T * Kz1
+        Kx1 = sp.hstack((Kx, sp.coo_array((2 * nslowness, 2 * nsta)))).tocsr()
+        KtK = Kx1.T @ Kx1
+        Ky1 = sp.hstack((Ky, sp.coo_array((2 * nslowness, 2 * nsta)))).tocsr()
+        KtK += Ky1.T @ Ky1
+        Kz1 = sp.hstack((Kz, sp.coo_array((2 * nslowness, 2 * nsta)))).tocsr()
+        KtK += par.wzK * Kz1.T @ Kz1
         nK = spl.norm(KtK)
         Kx = Kx.tocsr()
         Ky = Ky.tocsr()
@@ -1449,9 +1449,9 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 sys.stdout.flush()
 
             # compute vector C
-            cx = Kx * s
-            cy = Ky * s
-            cz = Kz * s
+            cx = Kx @ s
+            cy = Ky @ s
+            cz = Kz @ s
 
             # compute dP/dV, matrix of penalties derivatives
             for n in np.arange(nslowness):
@@ -1562,18 +1562,18 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                             tmp2 = Ls.multiply(np.tile(s_p, (Ls.shape[0], 1)))
                             Lev[ne] = sp.hstack((tmp1, tmp2))
                         elif Ls is None:
-                            Lev[ne] = sp.hstack((Lp, sp.csr_matrix(Lp.shape)))
+                            Lev[ne] = sp.hstack((Lp, sp.csr_array(Lp.shape)))
                         else:
                             tmp1 = Ls.multiply(np.tile(SsSp, (Ls.shape[0], 1)))
                             tmp2 = Ls.multiply(np.tile(s_p, (Ls.shape[0], 1)))
                             tmp2 = sp.hstack((tmp1, tmp2))
-                            tmp1 = sp.hstack((Lp, sp.csr_matrix(Lp.shape)))
+                            tmp1 = sp.hstack((Lp, sp.csr_array(Lp.shape)))
                             Lev[ne] = sp.vstack((tmp1, tmp2))
                     else:
                         if Lp is None:
-                            Lev[ne] = sp.hstack((sp.csr_matrix(Ls.shape), Ls))
+                            Lev[ne] = sp.hstack((sp.csr_array(Ls.shape), Ls))
                         elif Ls is None:
-                            Lev[ne] = sp.hstack((Lp, sp.csr_matrix(Lp.shape)))
+                            Lev[ne] = sp.hstack((Lp, sp.csr_array(Lp.shape)))
                         else:
                             Lev[ne] = sp.block_diag((Lp, Ls))
 
@@ -1597,12 +1597,12 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                             Lssc = None
 
                         if Lpsc is None:
-                            Lsc = sp.hstack((sp.csr_matrix(Lssc.shape), Lssc))
+                            Lsc = sp.hstack((sp.csr_array(Lssc.shape), Lssc))
                         elif Lssc is None:
-                            Lsc = sp.hstack((Lpsc, sp.csr_matrix(Lpsc.shape)))
+                            Lsc = sp.hstack((Lpsc, sp.csr_array(Lpsc.shape)))
                         else:
                             Lsc = sp.block_diag(
-                                (sp.csr_matrix(Lpsc), sp.csr_matrix(Lssc)))
+                                (sp.csr_array(Lpsc), sp.csr_array(Lssc)))
 
                         # add terms for station corrections after terms for
                         # velocity because solution vector contains
@@ -1670,8 +1670,8 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                     H[ns, 3] = -S0 * d[2] / ds
 
                 Q, _ = np.linalg.qr(H, mode='complete')
-                T = sp.csr_matrix(Q[:, 4:]).T
-                L = T * Lev[ne]
+                T = sp.csr_array(Q[:, 4:]).T
+                L = T @ Lev[ne]
 
                 if L1 is None:
                     L1 = L
@@ -1686,7 +1686,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                 if nttcals > 0:
                     Ls = Ls_cal[nc]
                 else:
-                    Ls = sp.csr_matrix([])
+                    Ls = sp.csr_array([])
 
                 if par.invert_VsVp:
                     if nttcals > 0:
@@ -1694,10 +1694,10 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
                         tmp1 = Ls.multiply(np.tile(SsSp, (Ls.shape[0], 1)))
                         tmp2 = Ls.multiply(np.tile(Vp, (Ls.shape[0], 1)))
                         tmp2 = sp.hstack((tmp1, tmp2))
-                        tmp1 = sp.hstack((Lp, sp.csr_matrix(Lp.shape)))
+                        tmp1 = sp.hstack((Lp, sp.csr_array(Lp.shape)))
                         L = sp.vstack((tmp1, tmp2))
                     else:
-                        L = sp.hstack((Lp, sp.csr_matrix(Lp.shape)))
+                        L = sp.hstack((Lp, sp.csr_array(Lp.shape)))
                 else:
                     L = sp.block_diag((Lp, Ls))
 
@@ -1716,21 +1716,21 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             ssc = -np.sum(sc_p)
 
             dP1 = sp.hstack(
-                (dP, sp.csr_matrix(
+                (dP, sp.csr_array(
                     (2 * nslowness, 2 * nsta)))).tocsr()  # dP prime
 
             # compute A & h for inversion
 
             L1 = L1.tocsr()
 
-            A = L1.T * L1
+            A = L1.T @ L1
 
             nM = spl.norm(A)
             λ = par.λ * nM / nK
 
             A += λ * KtK
 
-            tmp = dP1.T * dP1
+            tmp = dP1.T @ dP1
             nP = spl.norm(tmp)
             if nP != 0.0:
                 γ = par.γ * nM / nP
@@ -1740,20 +1740,20 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             A += γ * tmp
             A += u1Tu1
 
-            b = L1.T * r1
-            tmp2x = Kx1.T * cx
-            tmp2y = Ky1.T * cy
-            tmp2z = Kz1.T * cz
-            tmp3 = dP1.T * P
+            b = L1.T @ r1
+            tmp2x = Kx1.T @ cx
+            tmp2y = Ky1.T @ cy
+            tmp2z = Kz1.T @ cz
+            tmp3 = dP1.T @ P
             tmp = u1 * ssc
             b += -λ * tmp2x - λ * tmp2y - par.wzK * λ * tmp2z - γ * tmp3 - tmp
 
             if Vpts2.shape[0] > 0:
-                tmp = D1.T * D1
+                tmp = D1.T @ D1
                 nD = spl.norm(tmp)
                 α = par.α * nM / nD
                 A += α * tmp
-                b += α * D1.T * (Spts - D * s)
+                b += α * D1.T @ (Spts - D @ s)
 
             if par.verbose:
                 print('    calling minres with system of size'
@@ -1762,7 +1762,7 @@ def jointHypoVelPS(par, grid, data, rcv, Vinit, hinit, caldata=np.array([]),
             x = spl.minres(A, b)
 
             deltam = x[0]
-            resAxb[it] = np.linalg.norm(A * deltam - b)
+            resAxb[it] = np.linalg.norm(A @ deltam - b)
 
             dmax = np.max(np.abs(deltam[:nslowness]))
             if dmax > dVp_max:

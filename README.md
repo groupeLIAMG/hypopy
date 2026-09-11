@@ -13,7 +13,7 @@ See the tutorials for some examples.  There is also a notebook about the theory.
 
 ## Requirements
 
-Python 3.11 or later, with numpy, scipy and matplotlib, and
+Python 3.11 or later, with numpy, scipy (1.14 or later) and matplotlib, and
 
 ```
 pip install ttcrpy
@@ -73,6 +73,17 @@ shape `(maxit, nev, maxit_hypo)` and holds the traveltime misfit of each event
 at each iteration of its relocation, the counterpart of what `hypoloc`
 returns; entries are zero where an iteration was not reached, so mask them
 with `> 0`.
+
+## Sparse matrices
+
+The matrices built here, and those `ttcrpy` returns, are scipy **sparse
+arrays** (`csr_array`) rather than sparse matrices (`csr_matrix`), following
+scipy's own move away from `spmatrix`.
+
+The difference worth knowing is the operators: on a sparse array `*`
+multiplies elementwise and `@` is the matrix product, where on a sparse matrix
+`*` was the matrix product.  Code written against older versions keeps running
+and quietly computes something else, so `L * s` wants reading as `L @ s`.
 
 ## References
 
